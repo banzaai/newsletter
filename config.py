@@ -22,5 +22,5 @@ model = AzureChatOpenAI(
 )
 
 embeddings = AzureOpenAIEmbeddings(
-    model = "text-embedding-ada-002"
+    model = os.environ("EMBEDDINGS_MODEL")
     )
