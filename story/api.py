@@ -17,7 +17,7 @@ router = APIRouter()
 # Input schema
 class UserInputStory(BaseModel):
     name: Annotated[str, Field(description="Name of the user")]
-    story: Annotated[str, Field(description="Story to be analyzed")]
+    event: Annotated[str, Field(description="Story to be analyzed")]
 
 prompt_template = ChatPromptTemplate.from_messages(
         [
@@ -87,7 +87,7 @@ appl = workflow.compile(checkpointer=memory)
 @router.post("/story/")
 async def analyze_story(user_input: Annotated[UserInputStory, Body(...)]):
     try:
-        input_messages = [HumanMessage(content=f"{user_input.name} says: {user_input.story}")]
+        input_messages = [HumanMessage(content=f"{user_input.name} says: {user_input.event}")]
         response = appl.invoke({"messages": input_messages}, config={"configurable": {"thread_id": "abc345"}})
         return {"response": response["messages"][-1].content}
     except Exception as e:

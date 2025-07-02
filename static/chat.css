@@ -1,0 +1,133 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+    background-color: #f4f4f4;
+    color: #333;
+}
+
+h1 {
+    color: #444;
+}
+
+button {
+    background-color: #007BFF;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    margin-right: 10px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+#chatbox {
+    border: 1px solid #ccc;
+    background-color: white;
+    padding: 10px;
+    height: 300px;
+    overflow-y: scroll;
+    margin-top: 20px;
+    border-radius: 4px;
+}
+
+.message {
+    margin: 5px 0;
+}
+
+.user {
+    color: blue;
+    font-weight: bold;
+}
+
+.bot {
+    color: green;
+    font-weight: bold;
+}
+
+#inputArea {
+    margin-top: 20px;
+}
+
+#nameInput, #contentInput {
+    width: 100%;
+    padding: 8px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+textarea {
+    height: 100px;
+    resize: vertical;
+}
+
+button.active {
+    background-color: #28a745 !important; /* Green */
+    color: white;
+    border: 1px solid #1e7e34;
+}
+
+/* Container styling */
+#searchForm {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+/* Toggle button styling */
+#toggleTypeBtn {
+    padding: 8px 16px;
+    background-color: #f0f0f0;
+    border: 2px solid #007BFF;
+    color: #007BFF;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+#toggleTypeBtn:hover {
+    background-color: #007BFF;
+    color: white;
+}
+
+/* Input field styling */
+#queryInput {
+    flex: 1;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+/* Submit button styling */
+#searchForm button[type="submit"] {
+    padding: 8px 16px;
+    background-color: #28a745;
+    color: white;
+    border: none;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+#searchForm button[type="submit"]:hover {
+    background-color: #218838;
+}
+
+/* Result container */
+#resultContainer {
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #fafafa;
+}
+
+

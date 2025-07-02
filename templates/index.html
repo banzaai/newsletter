@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chatbot Interface</title>
+    <script src="/static/chat.js" defer></script>
+    <link rel="stylesheet" href="/static/chat.css">
+    <script>
+        function startChat(type) {
+            // Your existing logic to start chat
+            console.log("Starting chat for:", type);
+        }
+
+        function submitContent() {
+            // Your existing logic to submit content
+            console.log("Submitting content");
+        }
+
+        function accessAdmin() {
+            const password = prompt("Enter admin password:");
+            const correctPassword = "admin123"; // Hardcoded password
+
+            if (password === correctPassword) {
+                window.location.href = "/admin"; // Redirect to admin page
+            } else {
+                alert("Incorrect password. Access denied.");
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>Chatbot Interface</h1>
+    <button onclick="startChat('story')">Add Story</button>
+    <button onclick="startChat('event')">Add Event</button>
+    <button onclick="accessAdmin()">Admin</button> <!-- Admin Button -->
+
+    <div id="chatbox"></div>
+
+    <div id="inputArea" style="margin-top: 20px; display: none;">
+        <input type="text" id="nameInput" placeholder="Your Name" />
+        <textarea id="contentInput" placeholder="Your Story or Event"></textarea><br>
+        <button onclick="submitContent()">Submit</button>
+    </div>
+</body>
+</html>

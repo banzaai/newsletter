@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Panel</title>
+    <script src="/static/admin.js" defer></script>
+    <link rel="stylesheet" href="/static/chat.css">
+
+</head>
+<body>
+    <h1>Admin Panel</h1>
+    <form id="searchForm">
+    <button type="button" id="toggleTypeBtn">Mode: Event</button>
+    <input type="hidden" id="queryType" value="event" />
+    <input type="text" id="queryInput" placeholder="Enter your search query..." />
+    <button type="submit">Search</button>
+</form>
+
+<a href="/" style="display: inline-block; margin-bottom: 20px;">
+    <button type="button">Back to Home</button>
+</a>
+
+<div id="resultContainer" style="margin-top: 20px;"></div>
+
+</body>
+</html>
