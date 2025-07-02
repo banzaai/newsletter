@@ -22,5 +22,5 @@ model = AzureChatOpenAI(
 )
 
 embeddings = AzureOpenAIEmbeddings(
-    model = os.environ("EMBEDDINGS_MODEL")
+    model = os.getenv("EMBEDDINGS_MODEL")
     )
