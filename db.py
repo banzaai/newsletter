@@ -17,7 +17,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if ENVIRONMENT == "local":
     engine = create_engine(DATABASE_URL)
 else:
-    # Use async engine for PostgreSQL on Render
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
     engine = create_engine(DATABASE_URL, echo=True)
 
 
