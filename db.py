@@ -1,7 +1,6 @@
 from distro import name
 from fastapi import Depends
 from sqlmodel import SQLModel, create_engine, Session, Field
-from sqlalchemy.ext.asyncio import create_async_engine
 from langchain_core.tools import tool
 from langchain.docstore.document import Document
 from config import embeddings
@@ -15,10 +14,10 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if ENVIRONMENT == "local":
-    engine = create_engine(DATABASE_URL, echo=True)
+    engine = create_engine(DATABASE_URL)
 else:
     # Use async engine for PostgreSQL on Render
-    engine = create_async_engine(DATABASE_URL, echo=True)
+    engine = create_engine(DATABASE_URL, echo=True)
 
 
 class Story(SQLModel, table=True):
