@@ -8,11 +8,15 @@ from config import embeddings
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_chroma import Chroma
 import os
-
+from supabase import create_client, Client as SupabaseClient
 
 
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+supabase_url = os.getenv("VECTOR_DB_URL")
+supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+supabase = create_client(supabase_url, supabase_key)
 
 if ENVIRONMENT == "local":
     engine = create_engine(DATABASE_URL)
@@ -82,35 +86,73 @@ def store_vector(story_id: int, name: str, content: str):
     text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     documents = text_splitter.split_documents([document])
 
-    # Load existing vector store or create if not exists
-    db = Chroma(persist_directory="vector_db", embedding_function=embeddings)
+    environment = os.getenv("ENVIRONMENT", "production")
 
-    # Add new documents
-    db.add_documents(documents)
+    if environment == "production":
+        # Generate embedding using your embedding function
+        embedding = embeddings.embed_query(text_to_embed)
 
-    print(f"Storing vector for story ID {story_id}, Name: {name}, Content: {content}")
+        response = supabase.table("embeddings").insert({
+            "id": str(story_id),
+            "embedding": embedding
+        }).execute()
+
+        print(f"Uploaded vector to Supabase for story ID {story_id}: {response}")
+    else:
+        # Store locally in Chroma
+        db = Chroma(persist_directory="vector_db", embedding_function=embeddings)
+        collection = db.get_collection(name="default")
+
+        collection.add(
+            documents=[doc.page_content for doc in documents],
+            metadatas=[doc.metadata for doc in documents],
+            ids=[str(story_id)]
+        )
+
+        print(f"Stored vector locally for story ID {story_id}")
 
 def store_event_vector(event_id: int, name: str, event: str, category: str, organize_event: bool):
-    '''
-        Stores the vector representation of a user's event in the vector database.
-        '''
+    """
+    Stores the vector representation of a user's event:
+    - In Chroma if in development
+    - In Supabase if in production
+    """
+
+    # Prepare text and metadata
     text_to_embed = f"Name: {name} Event: {event} Event ID: {event_id} Category: {category} Organize Event: {organize_event}"
     document = Document(
-    page_content=text_to_embed,
-    metadata={"event_id": event_id, "name": name, "organize_event": organize_event, "category": category}
-)
+        page_content=text_to_embed,
+        metadata={"event_id": event_id, "name": name, "organize_event": organize_event, "category": category}
+    )
 
+    # Split text if needed
     text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     documents = text_splitter.split_documents([document])
 
-    # Load existing vector store or create if not exists
-    db = Chroma(persist_directory="vector_db", embedding_function=embeddings)
+    environment = os.getenv("ENVIRONMENT", "production")
 
-    # Add new documents
-    db.add_documents(documents)
+    if environment == "production":
+        # Generate embedding using your embedding function
+        embedding = embeddings.embed_query(text_to_embed)
 
-    print(f"Storing vector for event ID {event_id}, Name: {name}, Event: {event} Category: {category}")
+        response = supabase.table("embeddings").insert({
+            "id": str(event_id),
+            "embedding": embedding
+        }).execute()
 
+        print(f"Uploaded vector to Supabase for event ID {event_id}: {response}")
+    else:
+        # Store locally in Chroma
+        db = Chroma(persist_directory="vector_db", embedding_function=embeddings)
+        collection = db.get_collection(name="default")
+
+        collection.add(
+            documents=[doc.page_content for doc in documents],
+            metadatas=[doc.metadata for doc in documents],
+            ids=[str(event_id)]
+        )
+
+        print(f"Stored vector locally for event ID {event_id}")
 
 if __name__ == "__main__":
     SQLModel.metadata.create_all(engine)
