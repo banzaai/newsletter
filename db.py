@@ -1,15 +1,24 @@
 from distro import name
 from fastapi import Depends
 from sqlmodel import SQLModel, create_engine, Session, Field
+from sqlalchemy.ext.asyncio import create_async_engine
 from langchain_core.tools import tool
 from langchain.docstore.document import Document
 from config import embeddings
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_chroma import Chroma
+import os
 
 
-DATABASE_URL = "sqlite:///./test.db"
-engine = create_engine(DATABASE_URL)
+
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if ENVIRONMENT == "local":
+    engine = create_engine(DATABASE_URL, echo=True)
+else:
+    # Use async engine for PostgreSQL on Render
+    engine = create_async_engine(DATABASE_URL, echo=True)
 
 
 class Story(SQLModel, table=True):
@@ -29,7 +38,8 @@ class Event(SQLModel, table=True):
 
 @tool
 def save_story(name: str, content: str):
-    """Stores a user's story in the database."""
+    """Immediately call this function to save the user's 
+    story to the database when they confirm they are satisfied. Do not say the story is saved unless this function is called."""
     with Session(engine) as session:
         story = Story(name=name, story=content)
         session.add(story)
@@ -40,7 +50,8 @@ def save_story(name: str, content: str):
 
 @tool
 def save_event(name: str, content: str, organize_event: bool, category: str):
-    """Stores a user's event in the database."""
+    """Immediately call this function to save the user's 
+    event to the database when they confirm they are satisfied. Do not say the event is saved unless this function is called."""
     with Session(engine) as session:
         event = Event(name=name, event=content, organize_event=organize_event, category=category)
         session.add(event)

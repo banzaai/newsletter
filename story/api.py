@@ -39,9 +39,8 @@ prompt_template = ChatPromptTemplate.from_messages(
 
                 After sharing the improved story:
                 Ask the user if they are satisfied with the result.
-
-                If the user confirms they are satisfied (e.g., says "yes", "looks good", "I like it", etc.), call the save_story function to store the story in the database.
-
+                If the user expresses satisfaction with the improved story (e.g., says "yes", "looks good", "save", "I like it", etc.), 
+                you must immediately call the save_story function with the user's name and the improved story. Do not say it is saved unless you have called the function.
                 If the user is not satisfied, ask them what they would like to change or improve, and continue refining the story.
 
                 If the user asks a general question, answer it clearly and helpfully.
