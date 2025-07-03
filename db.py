@@ -92,7 +92,7 @@ def store_vector(story_id: int, name: str, content: str):
         # Generate embedding using your embedding function
         embedding = embeddings.embed_query(text_to_embed)
 
-        response = supabase.table("embeddings").insert({
+        response = supabase.table("stories").insert({
             "id": str(story_id),
             "embedding": embedding
         }).execute()
@@ -135,7 +135,7 @@ def store_event_vector(event_id: int, name: str, event: str, category: str, orga
         # Generate embedding using your embedding function
         embedding = embeddings.embed_query(text_to_embed)
 
-        response = supabase.table("embeddings").insert({
+        response = supabase.table("events").insert({
             "id": str(event_id),
             "embedding": embedding
         }).execute()
