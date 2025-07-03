@@ -1,3 +1,4 @@
+import traceback
 from distro import name
 from fastapi import Depends
 from sqlmodel import SQLModel, create_engine, Session, Field
@@ -43,7 +44,12 @@ def save_story(name: str, content: str):
         story = Story(name=name, story=content)
         session.add(story)
         session.commit()
-        store_vector(story.id, story.name, story.story) 
+        
+        try:
+            store_vector(story.id, story.name, story.story)
+        except Exception as e:
+            print("Vector storage failed:", e)
+            traceback.print_exc()
 
         return "Story saved successfully."
 
@@ -55,8 +61,11 @@ def save_event(name: str, content: str, organize_event: bool, category: str):
         event = Event(name=name, event=content, organize_event=organize_event, category=category)
         session.add(event)
         session.commit()
-        store_event_vector(event.id, event.name, event.event, event.category, event.organize_event)
-
+        try:
+            store_event_vector(event.id, event.name, event.event, event.category, event.organize_event)
+        except Exception as e:
+            print("Vector storage failed:", e)
+            traceback.print_exc()
     return "Event saved successfully."
 
 
