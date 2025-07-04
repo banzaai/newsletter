@@ -11,12 +11,14 @@ import os
 from supabase import create_client, Client as SupabaseClient
 
 
-ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+ENVIRONMENT = os.getenv("ENVIRONMENT")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-supabase_url = os.getenv("VECTOR_DB_URL")
-supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-supabase = create_client(supabase_url, supabase_key)
+if ENVIRONMENT == "production":
+    # Ensure the DATABASE_URL is in the correct format for psycopg
+    supabase_url = os.getenv("VECTOR_DB_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    supabase = create_client(supabase_url, supabase_key)
 
 if ENVIRONMENT == "local":
     engine = create_engine(DATABASE_URL)
@@ -101,10 +103,8 @@ def store_vector(story_id: int, name: str, content: str):
     else:
         # Store locally in Chroma
         db = Chroma(persist_directory="vector_db", embedding_function=embeddings)
-        collection = db.get_collection(name="default")
-
-        collection.add(
-            documents=[doc.page_content for doc in documents],
+        db.add_texts(
+            texts=[doc.page_content for doc in documents],
             metadatas=[doc.metadata for doc in documents],
             ids=[str(story_id)]
         )
@@ -144,10 +144,9 @@ def store_event_vector(event_id: int, name: str, event: str, category: str, orga
     else:
         # Store locally in Chroma
         db = Chroma(persist_directory="vector_db", embedding_function=embeddings)
-        collection = db.get_collection(name="default")
 
-        collection.add(
-            documents=[doc.page_content for doc in documents],
+        db.add_texts(
+            texts=[doc.page_content for doc in documents],
             metadatas=[doc.metadata for doc in documents],
             ids=[str(event_id)]
         )

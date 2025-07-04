@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Planner Viewer</title>
+  <link rel="stylesheet" href="/static/kanban.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Microsoft Planner Viewer</h1>
+
+    <a href="/query_kanban" class="start-button">Query the Kanban</a>
+
+    <div class="form-group">
+      <label for="teams">Select Team:</label>
+      <select id="teams"></select>
+    </div>
+
+    <div class="form-group">
+      <label for="plans">Select Plan:</label>
+      <select id="plans"></select>
+    </div>
+
+    <button class="load-button" onclick="loadTasks()">Load Tasks</button>
+
+    <div id="tasks" class="task-container"></div>
+    <button id="save-button" class="save-button" style="display: none;" onclick="saveInfo()">Save Info</button>
+
+  </div>
+
+  <script>
+    async function fetchTeams() {
+      const res = await fetch("/api/teams/");
+      const teams = await res.json();
+      const select = document.getElementById("teams");
+      select.innerHTML = "";
+      teams.forEach(team => {
+        const option = document.createElement("option");
+        option.value = team.id;
+        option.textContent = team.displayName;
+        select.appendChild(option);
+      });
+      if (teams.length > 0) {
+        fetchPlans(teams[0].id);
+      }
+    }
+
+    async function fetchPlans(teamId) {
+      const res = await fetch(`/api/plans/${teamId}/`);
+      const plans = await res.json();
+      const select = document.getElementById("plans");
+      select.innerHTML = "";
+      plans.forEach(plan => {
+        const option = document.createElement("option");
+        option.value = plan.id;
+        option.textContent = plan.title;
+        select.appendChild(option);
+      });
+    }
+
+    document.getElementById("teams").addEventListener("change", (e) => {
+      fetchPlans(e.target.value);
+    });
+
+async function saveInfo() {
+try {
+const res = await fetch("/api/save_kanban_info/", {
+    method: "POST",
+    headers: {
+        "Content-Type": "application/json"
+    },
+    body: JSON.stringify(loadedTasks)
+});
+if (res.ok) {
+    alert("Kanban info saved successfully!");
+} else {
+    alert("Failed to save info.");
+}
+} catch (error) {
+console.error("Error saving info:", error);
+alert("An error occurred while saving.");
+}
+}
+
+let loadedTasks = [];
+
+async function loadTasks() {
+  const planId = document.getElementById("plans").value;
+  const res = await fetch(`/api/tasks/${planId}/`);
+  const tasks = await res.json();
+  loadedTasks = tasks;
+  console.log(loadedTasks);
+  const container = document.getElementById("tasks");
+  container.innerHTML = "";
+
+  tasks.forEach(task => {
+    const div = document.createElement("div");
+    div.className = "task";
+    div.innerHTML = `
+      <strong>Name:</strong> ${task.bucketName}<br/>
+      <strong>Task:</strong> ${task.title}<br/>
+      <strong>Progress:</strong> ${task.percentComplete || 0}%<br/>
+      <strong>Priority:</strong> ${["Urgent", "Important", "Medium", "Low"][task.priority] || "Unknown"}<br/>
+      <strong>Notes:</strong> ${task.details.description || "No description"}<br/>
+      <strong>Checklist:</strong>
+      <ul>${
+        Object.values(task.details.checklist || {})
+          .map(item => `<li>${item.title}</li>`)
+          .join("")
+      }</ul>
+    `;
+    container.appendChild(div);
+  });
+
+  // Show the Save Info button
+  document.getElementById("save-button").style.display = "inline-block";
+}
+
+
+    fetchTeams();
+  </script>
+</body>
+</html>
