@@ -3,25 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <title>Kanban Query Assistant</title>
-  <link rel="stylesheet" href="/static/chat.css">
+  <link rel="stylesheet" href="/static/kanban2.css">
   <script src="/static/chat_kanban.js" defer></script>
 </head>
 <body>
-  <div class="container">
-    <h1>Kanban Query Assistant</h1>
-    <h3>You can query the Kanban to see the content of all current benchers.</h3>
-    <h5>Use the form below to interact with the assistant and explore or manage bench-related tasks.</h5>
+  <div class="chat-container">
+    <header>
+      <h1>Kanban Query Assistant</h1>
+      <p>Ask about current benchers, tasks, and more.</p>
+      <a href="/kanban" class="start-button">Back to Kanban</a>
+    </header>
 
-    <!-- Query Form -->
-    <form id="searchForm">
-      <label for="queryInput">Enter your query:</label><br>
-      <input type="text" id="queryInput" name="query" placeholder="e.g., Who is on the bench?" required><br><br>
+    <div id="chatWindow" class="chat-window">
+      <!-- Messages will be appended here -->
+    </div>
 
-      <button type="submit">Submit Query</button>
+    <form id="searchForm" class="chat-form">
+      <input type="text" id="queryInput" name="query" placeholder="E.j.: Who is currently on the bench." required>
+      <button type="submit">Send</button>
     </form>
-
-    <!-- Result Display -->
-    <div id="resultContainer" style="margin-top: 20px;"></div>
   </div>
 </body>
 </html>
+

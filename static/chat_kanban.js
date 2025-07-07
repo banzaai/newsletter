@@ -1,29 +1,48 @@
 document.addEventListener("DOMContentLoaded", () => {
     const form = document.getElementById("searchForm");
     const input = document.getElementById("queryInput");
-    const resultContainer = document.getElementById("resultContainer");
+    const chatWindow = document.getElementById("chatWindow");
 
     form.addEventListener("submit", async (e) => {
         e.preventDefault();
         const query = input.value.trim();
 
         if (!query) {
-            resultContainer.innerHTML = "<p>Please enter a query.</p>";
+            appendMessage("system", "Please enter a query.");
             return;
         }
 
-        try {
-            const response = await fetch(`/api/kanban_query?event=${encodeURIComponent(query)}`);
+        appendMessage("user", query);
+        input.value = "";
 
+        // Show loading message
+        const loadingMsg = appendMessage("assistant", "Thinking...");
+        
+        try {
+            const response = await fetch(`/api/kanban_query?query=${encodeURIComponent(query)}`);
             const data = await response.json();
 
-const content = data.results?.map(item => `<li>${item}</li>`).join('') || "No results found.";
-resultContainer.innerHTML = `<h3>Result:</h3><ul>${content}</ul>`;
-
-
+            const content = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+            loadingMsg.innerHTML = `<strong>Assistant:</strong> ${content}`;
         } catch (error) {
             console.error("Error fetching data:", error);
-            resultContainer.innerHTML = "<p>Error retrieving data.</p>";
+            loadingMsg.innerHTML = `<strong>System:</strong> Error retrieving data.`;
         }
     });
+
+    function appendMessage(sender, message) {
+        const messageDiv = document.createElement("div");
+        messageDiv.classList.add("chat-bubble", sender);
+        messageDiv.innerHTML = `<strong>${formatSender(sender)}:</strong> ${message}`;
+        chatWindow.appendChild(messageDiv);
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+        return messageDiv;
+    }
+
+    function formatSender(sender) {
+        if (sender === "user") return "You";
+        if (sender === "assistant") return "Assistant";
+        return "System";
+    }
 });
+
