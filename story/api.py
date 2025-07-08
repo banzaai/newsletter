@@ -105,7 +105,7 @@ async def get_story(query: Annotated[str, Query(description="Query to search for
     if os.getenv("ENVIRONMENT", "production") == "production":
 
         supabase = create_client(supabase_url, supabase_key)
-        data = supabase.table("vector").select("*").execute()
+        data = supabase.table("stories").select("*").execute()
 
         query_vector = embeddings.embed_query(query)
 
