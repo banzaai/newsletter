@@ -107,11 +107,11 @@ async def get_event(query: Annotated[str, Query(description="Query to search for
     """Endpoint to retrieve a user's event by name."""
     supabase_url = os.getenv("VECTOR_DB_URL")
     supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    
+
     if os.getenv("ENVIRONMENT", "production") == "production":
 
-        supabase = create_client(supabase_url, supabase_key, is_async=False)
-        data = supabase.table("vector").select("*").execute().data
+        supabase = create_client(supabase_url, supabase_key)
+        data = supabase.table("vector").select("*").execute()
 
         query_vector = embeddings.embed_query(query)
 
