@@ -1,1 +1,4 @@
 .env
+token_cache.json
+vector_kanban_db/
+vector_db/
