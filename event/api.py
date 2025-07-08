@@ -105,10 +105,12 @@ async def make_event(user_input: Annotated[UserInputEvent, Body(...)]):
 @router.get("/event/")
 async def get_event(query: Annotated[str, Query(description="Query to search for an event")]):
     """Endpoint to retrieve a user's event by name."""
-
+    supabase_url = os.getenv("VECTOR_DB_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    
     if os.getenv("ENVIRONMENT", "production") == "production":
 
-        supabase = create_client(os.getenv("VECTOR_DB_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY"), is_async=False)
+        supabase = create_client(supabase_url, supabase_key, is_async=False)
         data = supabase.table("vector").select("*").execute().data
 
         query_vector = embeddings.embed_query(query)
