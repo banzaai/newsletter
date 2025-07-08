@@ -108,7 +108,7 @@ async def get_event(query: Annotated[str, Query(description="Query to search for
 
     if os.getenv("ENVIRONMENT", "production") == "production":
 
-        supabase = create_client(os.getenv("VECTOR_DB_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY"))
+        supabase = create_client(os.getenv("VECTOR_DB_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY"), is_async=False)
         data = supabase.table("vector").select("*").execute().data
 
         query_vector = embeddings.embed_query(query)
