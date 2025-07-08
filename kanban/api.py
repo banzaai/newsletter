@@ -150,15 +150,15 @@ def load_cache():
     try:
         cache = msal.SerializableTokenCache()
         if TOKEN_CACHE:
-            cache.deserialize(open(TOKEN_CACHE, "r").read())
-        else:
-            if os.path.exists(CACHE_FILE):
-                # Load from file if it exists
-                with open(CACHE_FILE, "r") as f:
-                    cache.deserialize(f.read())
+            # Deserialize directly from the string
+            cache.deserialize(TOKEN_CACHE)
+        elif os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, "r") as f:
+                cache.deserialize(f.read())
         return cache
     except Exception as e:
         raise RuntimeError(f"Error loading token cache: {e}")
+
 
 def save_cache(cache):
     try:
