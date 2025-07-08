@@ -1,4 +1,7 @@
+import json
+import os
 from fastapi import Body, HTTPException, APIRouter, Query
+import numpy as np
 from pydantic import BaseModel, Field
 from typing import Annotated
 
@@ -7,6 +10,7 @@ from langchain.agents import initialize_agent, AgentType
 from langgraph.graph import StateGraph, MessagesState
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from supafunc import create_client
 from config import model, embeddings
 from langchain_chroma import Chroma
 from db import save_event
@@ -98,23 +102,67 @@ async def make_event(user_input: Annotated[UserInputEvent, Body(...)]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-@router.get('/event/')
+@router.get("/event/")
 async def get_event(query: Annotated[str, Query(description="Query to search for an event")]):
-    """Endpoint to retrieve the event creation workflow."""
-    try:
+    """Endpoint to retrieve a user's event by name."""
+
+    if os.getenv("ENVIRONMENT", "production") == "production":
+
+        supabase = create_client(os.getenv("VECTOR_DB_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY"))
+        data = supabase.table("vector").select("*").execute().data
+
+        query_vector = embeddings.embed_query(query)
+
+        def cosine_similarity(a, b):
+            a = np.array(a)
+            b = np.array(b)
+            return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+        scored = []
+        for item in data:
+            embedding = json.loads(item["embedding"]) if isinstance(item["embedding"], str) else item["embedding"]
+            score = cosine_similarity(query_vector, embedding)
+            scored.append({**item, "score": score})
+
+        response = [
+            {
+                "event_id": item.get("event_id"),
+                "name": item.get("name"),
+                "content": item.get("text")
+            }
+            for item in sorted(scored, key=lambda x: x["score"], reverse=True)[:10]
+        ]
+
+    else:
         db = Chroma(persist_directory="vector_db", embedding_function=embeddings)
-
-        result = db.similarity_search(query)
-
+        results = db.similarity_search(query, k=10)
         response = [
             {
                 "event_id": doc.metadata.get("event_id"),
                 "name": doc.metadata.get("name"),
                 "content": doc.page_content
-            } for doc in result
+            } for doc in results
         ]
 
-        return {"events": response[0]['content']} if response else {"message": "No events found."}
+    bot_answer_response = bot_answer(response, query)
+    return {"events": bot_answer_response} if response else {"events": "No events found."}
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+def bot_answer(response: list[dict], query: str) -> str:
+    if not response:
+        return "No events found."
+
+    # Format the response into a string
+    content_summary = "\n\n".join(
+        f"Event ID: {item['event_id']}\nName: {item['name']}\nContent: {item['content']}"
+        for item in response
+    )
+
+    prompt_text = (
+        f"You are a helpful assistant that provides comprehensive answers based on the user's query.\n"
+        f"Query: {query}\n\n"
+        f"Content:\n{content_summary}\n\n"
+        "Please provide a detailed and informative answer."
+    )
+
+    return model.invoke(prompt_text).content.strip()
