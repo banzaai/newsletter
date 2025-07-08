@@ -27,6 +27,7 @@ TENANT_ID = os.getenv("TENANT_ID")
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["Group.Read.All", "Tasks.Read"]
 CACHE_FILE = os.getenv("CACHE_FILE")
+TOKEN_CACHE = os.getenv("TOKEN_CACHE")
 
 
 class MessagesState(TypedDict):
@@ -148,7 +149,9 @@ class TaskList(BaseModel):
 def load_cache():
     try:
         cache = msal.SerializableTokenCache()
-        if os.path.exists(CACHE_FILE):
+        if TOKEN_CACHE:
+            cache.deserialize(open(TOKEN_CACHE, "r").read())
+        elif os.path.exists(CACHE_FILE):
             cache.deserialize(open(CACHE_FILE, "r").read())
         return cache
     except Exception as e:
@@ -157,10 +160,16 @@ def load_cache():
 def save_cache(cache):
     try:
         if cache.has_state_changed:
+            # Save to file
             with open(CACHE_FILE, "w") as f:
                 f.write(cache.serialize())
+
+            # Also print to console for manual copy-paste into Render env var
+            print("🔐 Updated TOKEN_CACHE (copy this to Render env var):")
+            print(cache.serialize())
     except Exception as e:
         raise RuntimeError(f"Error saving token cache: {e}")
+
 
 def get_access_token():
     try:
