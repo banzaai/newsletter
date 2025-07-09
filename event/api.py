@@ -10,10 +10,10 @@ from langchain.agents import initialize_agent, AgentType
 from langgraph.graph import StateGraph, MessagesState
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from supafunc import create_client
 from config import model, embeddings
 from langchain_chroma import Chroma
 from db import save_event
+from supabase import create_client, Client as SupabaseClient
 
 router = APIRouter()
 
@@ -104,7 +104,7 @@ async def make_event(user_input: Annotated[UserInputEvent, Body(...)]):
     
 @router.get("/event/")
 async def get_event(query: Annotated[str, Query(description="Query to search for an event")]):
-    """Endpoint to retrieve a user's event by name."""
+    """Endpoint to retrieve a user's events based on a query."""
     supabase_url = os.getenv("VECTOR_DB_URL")
     supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
@@ -128,9 +128,8 @@ async def get_event(query: Annotated[str, Query(description="Query to search for
 
         response = [
             {
-                "event_id": item.get("event_id"),
-                "name": item.get("name"),
-                "content": item.get("text")
+                "event_id": item.get("id"),
+                "content": item.get("embedding"),
             }
             for item in sorted(scored, key=lambda x: x["score"], reverse=True)[:10]
         ]

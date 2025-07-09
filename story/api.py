@@ -10,8 +10,7 @@ from langchain.agents import initialize_agent, AgentType
 from langgraph.graph import StateGraph, MessagesState
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from supafunc import create_client
-
+from supabase import create_client, Client as SupabaseClient
 from config import model, embeddings
 from langchain_chroma import Chroma
 from db import save_story
@@ -122,9 +121,8 @@ async def get_story(query: Annotated[str, Query(description="Query to search for
 
         response = [
             {
-                "story_id": item.get("story_id"),
-                "name": item.get("name"),
-                "content": item.get("text")
+                "story_id": item.get("id"),
+                "content": item.get("embedding")
             }
             for item in sorted(scored, key=lambda x: x["score"], reverse=True)[:10]
         ]
