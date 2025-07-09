@@ -121,9 +121,9 @@ async def get_story(query: Annotated[str, Query(description="Query to search for
 
         response = [
             {
-                "story_id": item.get("story_id"),
+                "story_id": item.get("id"),
                 "name": item.get("name"),
-                "content": item.get("embedding")
+                "content": item.get("content")
             }
             for item in sorted(scored, key=lambda x: x["score"], reverse=True)[:10]
         ]
@@ -133,7 +133,7 @@ async def get_story(query: Annotated[str, Query(description="Query to search for
         results = db.similarity_search(query, k=10)
         response = [
             {
-                "story_id": doc.metadata.get("story_id"),
+                "story_id": doc.metadata.get("id"),
                 "name": doc.metadata.get("name"),
                 "content": doc.page_content
             } for doc in results

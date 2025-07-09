@@ -96,7 +96,9 @@ def store_vector(story_id: int, name: str, content: str):
 
         response = supabase.table("stories").insert({
             "id": str(story_id),
-            "embedding": embedding
+            "embedding": embedding,
+            "name": name,
+            "content": content
         }).execute()
 
         print(f"Uploaded vector to Supabase for story ID {story_id}: {response}")
@@ -137,8 +139,14 @@ def store_event_vector(event_id: int, name: str, event: str, category: str, orga
 
         response = supabase.table("events").insert({
             "id": str(event_id),
-            "embedding": embedding
+            "embedding": embedding,
+            "name": name,
+            "content": event,
+            "category": category,
+            "organize_event": organize_event
         }).execute()
+
+
 
         print(f"Uploaded vector to Supabase for event ID {event_id}: {response}")
     else:

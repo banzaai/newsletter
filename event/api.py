@@ -128,9 +128,11 @@ async def get_event(query: Annotated[str, Query(description="Query to search for
 
         response = [
             {
-                "event_id": item.get("event_id"),
+                "event_id": item.get("id"),
                 "name": item.get("name"),
-                "content": item.get("embedding"),
+                "content": item.get("content"),
+                "organize_event": item.get("organize_event"),
+                "category": item.get("category")
             }
             for item in sorted(scored, key=lambda x: x["score"], reverse=True)[:10]
         ]
@@ -142,7 +144,9 @@ async def get_event(query: Annotated[str, Query(description="Query to search for
             {
                 "event_id": doc.metadata.get("event_id"),
                 "name": doc.metadata.get("name"),
-                "content": doc.page_content
+                "content": doc.page_content,
+                "organize_event": doc.metadata.get("organize_event"),
+                "category": doc.metadata.get("category")
             } for doc in results
         ]
 
@@ -156,7 +160,7 @@ def bot_answer(response: list[dict], query: str) -> str:
 
     # Format the response into a string
     content_summary = "\n\n".join(
-        f"Event ID: {item['event_id']}\nName: {item['name']}\nContent: {item['content']}"
+        f"Event ID: {item['event_id']}\nName: {item['name']}\nContent: {item['content']}\nOrganize Event: {item['organize_event']}\nCategory: {item['category']}"
         for item in response
     )
 
