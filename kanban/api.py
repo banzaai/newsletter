@@ -7,7 +7,7 @@ import msal
 import requests
 import os
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import db
 from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.checkpoint.memory import MemorySaver
@@ -30,13 +30,12 @@ CACHE_FILE = os.getenv("CACHE_FILE")
 TOKEN_CACHE = os.getenv("TOKEN_CACHE")
 
 
-class MessagesState(TypedDict):
-    messages: list 
-    query: str
-    context: str
+class MyState(MessagesState):
+    context: str = Field(
+        default="")
 
-
-def call_model(state: MessagesState):
+def call_model(state: MyState):
+    context = state["context"]
     system_prompt = (
         f"""
 
@@ -44,14 +43,11 @@ def call_model(state: MessagesState):
         Always respond in full sentences, providing complete and clear information based on the context provided.
         You are aware of the full message history and the current query..
 
-        context is:
-        {state["context"]}
-
         ### 🎯 Your Objective
 
         Your job is to:
-        1. **Understand the current query:{state["query"]}** in the context of the full message history.
-        2. **Analyze the task context** to extract relevant and accurate information.
+        1. **Understand the current query:** in the context of the full message history.
+        2. **Analyze the task context: {context}** to extract relevant and accurate information.
         3. **Respond** Always respond in full sentences, providing complete and clear information based on the context provided.
         ---
 
@@ -92,7 +88,7 @@ def call_model(state: MessagesState):
 
 
 # Define the graph globally (outside the endpoint)
-workflow = StateGraph(MessagesState)
+workflow = StateGraph(MyState)
 workflow.add_node("model", call_model)
 workflow.set_entry_point("model")  # or use add_edge(START, "model") if START is defined
 app = workflow.compile(checkpointer=MemorySaver())
@@ -287,13 +283,10 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
         return HTMLResponse(content=f"Error saving kanban information: {e}")
     
 
-# Global in-memory store
-# session_memory = {}
-
 @router.get("/kanban_query/")
 async def kanban_query(
     query: Annotated[str, Query(description="Query to search in the kanban")],
-    thread_id: Annotated[str, Query(description="Session ID for memory")] = "default"
+
 ):
     print('I am here in the kanban query function')
     print(f"Received query: {query}")
@@ -305,23 +298,14 @@ async def kanban_query(
         return JSONResponse(content={"message": "No kanban data available."})
     context = "\n".join(raw_docs)
 
-    # # Retrieve or initialize message history
-    # if thread_id not in session_memory:
-    #     session_memory[thread_id] = []
-    # session_memory[thread_id].append(HumanMessage(content=query))
+    state = MyState(
+        messages=[HumanMessage(content=query)],
+        context=context
+    )
+ 
 
-    state: MessagesState = {
-        "messages": [HumanMessage(content=query)],
-        "query": query,
-        "context": context
-    }
-
-
-    result = app.invoke(state, config={"configurable": {"thread_id": thread_id}})
+    result = app.invoke(state, config={"configurable": {"thread_id": "1"}})
     response = result["messages"][-1].content if result else "No results found."
-
-    # Append assistant response to memory
-    # session_memory[thread_id].append(result["messages"][-1])
 
     return response
 
