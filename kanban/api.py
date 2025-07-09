@@ -31,58 +31,28 @@ TOKEN_CACHE = os.getenv("TOKEN_CACHE")
 
 
 class MessagesState(TypedDict):
-    messages: List[BaseMessage]
+    messages: list 
     query: str
     context: str
 
 
 def call_model(state: MessagesState):
     system_prompt = (
-        f"""context is:
+        f"""
+
+        You are a highly intelligent, context-aware chatbot designed to assist with task management queries.
+        Always respond in full sentences, providing complete and clear information based on the context provided.
+        You are aware of the full message history and the current query..
+
+        context is:
         {state["context"]}
-        The query is:
-        {state["query"]}
-        message history is:
-        {state["messages"]}
-
-        You are a highly intelligent, context-aware chatbot designed to assist with task management queries. Always respond in full sentences, providing complete and clear information based on the context provided.
-        You have to be able to compare the differences between the bucket names and the task titles, and you have to be able to understand the subtasks in the checklist.
-        You will be provided with:
-        - A **context**: a list of tasks, each with the following fields:
-        - `title`: the name of the task.
-        - `Bucket`: Name of person assigned to the task, this means this person is on the bench regardless of their current task status.
-        - `percentComplete`: a number from 0 to 100 indicating task completion.
-        - `details`: a description of the task.
-        - `checklist`: a dictionary of subtasks related to the main task, always indicate this is a subtask with reference to the main task.
-
-        - A **query**: a natural language question asking for specific information from the context.
-
-        - A **message history**: a list of previous messages exchanged between the user and the assistant.
-
-        ---
 
         ### 🎯 Your Objective
 
         Your job is to:
-        1. **Understand the current query** in the context of the full message history.
-        2. **Analyze the task context** to extract only the most relevant and accurate information.
+        1. **Understand the current query:{state["query"]}** in the context of the full message history.
+        2. **Analyze the task context** to extract relevant and accurate information.
         3. **Respond** Always respond in full sentences, providing complete and clear information based on the context provided.
-        ---
-
-        ### 📌 Important Definitions
-        - A person is considered **"on the bench"** if their name appears as a `Bucket` in the context.
-        - The `title` is the name of the task the person is working on or has completed.
-        - The `checklist` contains subtasks related to the main task.
-        - The `details` field may contain additional descriptive information about the task.
-
-        ---
-
-        ### 🧾 Response Guidelines
-
-        - **All information**: Respond with all relevant information from the context that answers the query, try to infer the user's intent.
-        - **Be honest**: If the answer is not found in the context, respond with:
-        > "The information you're looking for is not available in the provided context."
-
         ---
 
         ### 🧪 Examples
@@ -111,7 +81,7 @@ def call_model(state: MessagesState):
 
         - If the query is **ambiguous**, ask a clarifying question.
         - If the **context is empty**, respond with:
-        > "No task data is available to answer your query."
+        > "Please specify the query in a different way or provide more context."
 
         """
     )
@@ -318,7 +288,7 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
     
 
 # Global in-memory store
-session_memory = {}
+# session_memory = {}
 
 @router.get("/kanban_query/")
 async def kanban_query(
@@ -335,23 +305,23 @@ async def kanban_query(
         return JSONResponse(content={"message": "No kanban data available."})
     context = "\n".join(raw_docs)
 
-    # Retrieve or initialize message history
-    if thread_id not in session_memory:
-        session_memory[thread_id] = []
-    session_memory[thread_id].append(HumanMessage(content=query))
+    # # Retrieve or initialize message history
+    # if thread_id not in session_memory:
+    #     session_memory[thread_id] = []
+    # session_memory[thread_id].append(HumanMessage(content=query))
 
-    # Build state
     state: MessagesState = {
-        "messages": session_memory[thread_id],
+        "messages": [HumanMessage(content=query)],
         "query": query,
         "context": context
     }
+
 
     result = app.invoke(state, config={"configurable": {"thread_id": thread_id}})
     response = result["messages"][-1].content if result else "No results found."
 
     # Append assistant response to memory
-    session_memory[thread_id].append(result["messages"][-1])
+    # session_memory[thread_id].append(result["messages"][-1])
 
     return response
 
