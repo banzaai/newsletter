@@ -20,14 +20,26 @@ document.addEventListener("DOMContentLoaded", () => {
         
         try {
             const response = await fetch(`/api/kanban_query?query=${encodeURIComponent(query)}`);
-            const data = await response.json();
+            const msg = await response.json();
+            console.log("msg.filename:", msg);
 
-            const content = typeof data === "string" ? data : JSON.stringify(data, null, 2);
-            loadingMsg.innerHTML = `<strong>Assistant:</strong> ${content}`;
+            if (msg && typeof msg === "object" && msg['filename'] != null) {
+
+                const imageUrl = `/api/plot?filename=${encodeURIComponent(msg['filename'])}`;
+                loadingMsg.innerHTML = `
+                    <strong>Assistant:</strong><br>
+                    <img src="${imageUrl}" alt="Generated Plot" style="max-width: 100%; height: auto;" /><br>
+                    <p>${msg['html'] || ""}</p>
+                `;
+            } else {
+                // Just a text response
+                loadingMsg.innerHTML = `<strong>Assistant:</strong> ${typeof msg === "string" ? msg : msg['html']}`;
+            }
         } catch (error) {
-            console.error("Error fetching data:", error);
+            console.error("Error rendering message:", error);
             loadingMsg.innerHTML = `<strong>System:</strong> Error retrieving data.`;
         }
+
     });
 
     function appendMessage(sender, message) {

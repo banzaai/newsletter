@@ -1,7 +1,7 @@
 from typing import Annotated, Dict, List, Optional
 from fastapi import APIRouter, Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from langchain_chroma import Chroma
 import msal
 import requests
@@ -12,10 +12,16 @@ import db
 from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts.chat import MessagesPlaceholder, ChatPromptTemplate
 from config import model, embeddings
 from typing import TypedDict, List
 from langchain_core.messages import BaseMessage
+import markdown
+from langchain.agents import initialize_agent, AgentType
+from langchain.tools import tool
+import os
+import tempfile
+import uuid
 
 
 load_dotenv()
@@ -29,69 +35,120 @@ SCOPES = ["Group.Read.All", "Tasks.Read"]
 CACHE_FILE = os.getenv("CACHE_FILE")
 TOKEN_CACHE = os.getenv("TOKEN_CACHE")
 
+filename_real = None
+@tool
+def generate_plot(data_json: str, plot_type: str = "line") -> dict:
+    """
+    Generates a plot from JSON data and saves it to a temporary file.
+    Returns a dictionary with the filename and a short description.
+    """
+    import json
+    import matplotlib.pyplot as plt
+    global filename_real
+    data = json.loads(data_json)
+    plt.figure()
+    if plot_type == "line":
+        plt.plot(data["x"], data["y"])
+    elif plot_type == "bar":
+        plt.bar(data["x"], data["y"])
+
+    # Generate a unique filename
+    filename = f"{uuid.uuid4().hex}.png"
+    temp_dir = tempfile.gettempdir()
+    file_path = os.path.join(temp_dir, filename)
+    plt.savefig(file_path)
+    print(f'filename is {filename}')
+    filename_real = filename 
+    return {
+        "text": "Plot saved to temporary file."
+    }
+
 
 class MyState(MessagesState):
-    context: str = Field(
-        default="")
+    context: str = Field(default="")
 
-def call_model(state: MyState):
-    context = state["context"]
-    system_prompt = (
-        f"""
+prompt_template = ChatPromptTemplate.from_messages(
+    [
+        (
 
-        You are a highly intelligent, context-aware chatbot designed to assist with task management queries.
-        Always respond in full sentences, providing complete and clear information based on the context provided.
-        You are aware of the full message history and the current query..
+        "system",
+        
+            f"""
 
-        ### 🎯 Your Objective
+                You are a highly intelligent, context-aware chatbot designed to assist with task management queries.
+                Always respond in full sentences, providing complete and clear information based on the context provided.
+                You are aware of the full message history and the current query.
 
-        Your job is to:
-        1. **Understand the current query:** in the context of the full message history.
-        2. **Analyze the task context: {context}** to extract relevant and accurate information.
-        3. **Respond** Always respond in full sentences, providing complete and clear information based on the context provided.
-        ---
+                ### 🎯 Your Objective
 
-        ### 🧪 Examples
+                Your job is to:
+                1. **Understand the current query:** in the context of the full message history.
+                2. **Analyze the task context: {{context}}** to extract relevant and accurate information.
+                3. **Respond** Always respond in full sentences, providing complete and clear information based on the context provided.
+                4. Responses should be in markdown format with appropriate headings and bullet points where necessary.
+                5. **Use the tools available** to generate plots or visualizations if especifically asked for.
+                ---
 
-        **Example 1**  
-        Query: *"What tasks are assigned to people on the bench?"*  
-        Response:
-        - John Doe: "Update Documentation" (50% complete)
-        - Jane Smith: "Code Review" (100% complete)
+                IMPORTANT: 
+                -All people who appear in the context are on the bench regardless of their tasks completion status.
+                
+                
+                When calling the `generate_plot` tool:
+                - Always pass a JSON string with **two keys**: `"x"` and `"y"`.
+                - `"x"` should be a list of labels (e.g., names of people).
+                - `"y"` should be a list of corresponding numeric values (e.g., task counts).
+                - Example: `"x": ["Alice", "Bob"], "y": [3, 5]`
 
-        **Example 2**  
-        Query: *"Which tasks are incomplete?"*  
-        Response:
-        - "Write Unit Tests" (assigned to Alice, 20% complete)
-        - "Design Mockups" (assigned to Bob, 0% complete)
+            
+                                                   
 
-        **Example 3**  
-        Query: *"Who is on the bench?"*  
-        Response:
-        - John Doe
-        - Jane Smith
+                
 
-        ---
+                ---
 
-        ### ⚠️ Edge Cases
+                ### ⚠️ Edge Cases
 
-        - If the query is **ambiguous**, ask a clarifying question.
-        - If the **context is empty**, respond with:
-        > "Please specify the query in a different way or provide more context."
+                - If the query is **ambiguous**, ask a clarifying question.
+                - If the **context is empty**, respond with:
+                > "Please specify the query in a different way or provide more context."
 
-        """
-    )
+                """
+        ), MessagesPlaceholder(variable_name="messages")
+    ]
+)
 
-    messages = [SystemMessage(content=system_prompt)] + state["messages"]
-    response = model.invoke(messages)
-    return {"messages": state["messages"] + [response]}
-
+agent_executor = initialize_agent(
+    tools=[generate_plot],
+    llm=model,
+    agent=AgentType.OPENAI_FUNCTIONS,
+    verbose=True,
+)
 
 # Define the graph globally (outside the endpoint)
 workflow = StateGraph(MyState)
+
+def call_model(state: MyState):
+    prompt = prompt_template.invoke(state)
+    response = agent_executor.run(prompt.to_string())
+    print(response)
+    if 'filename' in response[-1]:
+        print('IN HEREEEEEEEEEEE')
+        return {
+            "messages": [
+                {
+                    "text": response["text"],
+                    "filename": response["filename"]
+                }
+            ]
+        }
+    else:
+        return {"messages": [response]}
+
+
 workflow.add_node("model", call_model)
 workflow.set_entry_point("model")  # or use add_edge(START, "model") if START is defined
 app = workflow.compile(checkpointer=MemorySaver())
+
 
 class ChecklistItem(BaseModel):
     title: str
@@ -290,7 +347,7 @@ async def kanban_query(
 ):
     print('I am here in the kanban query function')
     print(f"Received query: {query}")
-
+    global filename_real
     # Load context from vector DB
     db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
     raw_docs = db.get()['documents']
@@ -298,14 +355,21 @@ async def kanban_query(
         return JSONResponse(content={"message": "No kanban data available."})
     context = "\n".join(raw_docs)
 
-    state = MyState(
-        messages=[HumanMessage(content=query)],
-        context=context
-    )
- 
-
-    result = app.invoke(state, config={"configurable": {"thread_id": "1"}})
+    result = app.invoke({"messages": query, "context":context}, config={"configurable": {"thread_id": "1"}})
     response = result["messages"][-1].content if result else "No results found."
+    response_markdown = markdown.markdown(response)
+    return JSONResponse(content={'html': response_markdown,
+                                 'filename': filename_real})
 
-    return response
+@router.get("/plot")
+def get_plot(filename: str = Query(...)):
+    global filename_real
+    temp_dir = tempfile.gettempdir()
+    file_path = os.path.join(temp_dir, filename)
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    filename_real=None
+    return FileResponse(file_path, media_type="image/png")
+
 
