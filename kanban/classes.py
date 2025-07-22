@@ -60,7 +60,7 @@ Your job is to:
 
 ## 🧾 Output Formatting Guidelines
 
-- Use markdown formatting, only bullet points no numbers. Make sure task title is marked in negrita.
+- Use markdown formatting, only bullet points no numbers. Make sure task title is underlined and marked in negrita.
 - Be concise but complete.
 - Ensure clarity and structure in your response.
 
