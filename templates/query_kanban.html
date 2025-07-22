@@ -13,13 +13,23 @@
       <p>Ask about current benchers, tasks, and more.</p>
       <a href="/kanban" class="start-button">Back to Kanban</a>
     </header>
+      <div class="input-section">
+        <label for="bencherInput">Bencher:</label>
+        <input type="text" id="bencherInput" placeholder="Enter bencher name" />
+        
+        <label for="incompleteOnly" class="checkbox-label">
+          <input type="checkbox" id="incompleteOnly" /> Incomplete only
+        </label>
+      </div>
+      <hr class="section-divider" />
+
 
     <div id="chatWindow" class="chat-window">
       <!-- Messages will be appended here -->
     </div>
 
     <form id="searchForm" class="chat-form">
-      <input type="text" id="queryInput" name="query" placeholder="E.j.: Who is currently on the bench." required>
+      <input type="text" id="queryInput" name="query" placeholder="E.j.: Who is currently on the bench.">
       <button type="submit">Send</button>
     </form>
   </div>

@@ -10,7 +10,7 @@
     <h1>Microsoft Planner Viewer</h1>
 
     <a href="/query_kanban" class="start-button">Query the Kanban</a>
-    <a href="/" class="start-button">Back to Home</a>
+    <a href="/" class="start-button">Back to home</a>
 
     <div class="form-group">
       <label for="teams">Select Team:</label>
@@ -18,14 +18,12 @@
     </div>
 
     <div class="form-group">
-      <label for="plans">Select Plan:</label>
+      <label for="plans">Select plan:</label>
       <select id="plans"></select>
     </div>
 
-    <button class="load-button" onclick="loadTasks()">Load Tasks</button>
-
-    <div id="tasks" class="task-container"></div>
-    <button id="save-button" class="save-button" style="display: none;" onclick="saveInfo()">Save Info</button>
+    <div id="spinner" class="spinner"></div>
+    <button class="load-button" onclick="loadTasks()">Load and save tasks</button>
 
   </div>
 
@@ -63,73 +61,41 @@
       fetchPlans(e.target.value);
     });
 
-async function saveInfo() {
-try {
-const res = await fetch("/api/save_kanban_info/", {
-    method: "POST",
-    headers: {
-        "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ tasks: loadedTasks })
-});
-if (res.ok) {
-    alert("Kanban info saved successfully!");
-} else {
-    alert("Failed to save info.");
-}
-} catch (error) {
-console.error("Error saving info:", error);
-alert("An error occurred while saving.");
-}
-}
+    let loadedTasks = [];
 
-let loadedTasks = [];
+    async function loadTasks() {
+      const spinner = document.getElementById("spinner");
+      spinner.style.display = "block";
 
-async function loadTasks() {
-  const planId = document.getElementById("plans").value;
-  const res = await fetch(`/api/tasks/${planId}/`);
-  const tasks = await res.json();
-  loadedTasks = tasks;
-  console.log("the loadedTasks", loadedTasks);
-  const container = document.getElementById("tasks");
-  container.innerHTML = "";
+      const planId = document.getElementById("plans").value;
 
-  tasks.forEach(task => {
-    const div = document.createElement("div");
-    div.className = "task";
-    div.innerHTML = `
-  <strong>Name:</strong> ${task.bucketName}<br/>
-  <strong>Task:</strong> ${task.title}<br/>
-  <strong>Progress:</strong> ${task.percentComplete || 0}%<br/>
-  <strong>Priority:</strong> ${["Urgent", "Important", "Medium", "Low"][task.priority] || "Unknown"}<br/>
-  <strong>Notes:</strong> ${task.details.description || "No description"}<br/>
-  <strong>Checklist:</strong>
-  ${
-    task.details.checklist && Object.keys(task.details.checklist).length > 0
-      ? `<ul>${Object.values(task.details.checklist)
-          .map(item => `<li>${item.title}</li>`)
-          .join("")}</ul>`
-      : "<em>No checklist items.</em>"
-  }
-`;
+      try {
+        // Step 1: Load tasks
+        const res = await fetch(`/api/tasks/${planId}/`);
+        const tasks = await res.json();
+        loadedTasks = tasks;
 
-    container.appendChild(div);
-  });
+        // Step 2: Save tasks immediately
+        const saveRes = await fetch("/api/save_kanban_info/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ tasks: loadedTasks })
+        });
 
-const button = document.getElementById("save-button");
-button.style.display = "inline-block";
-button.style.padding = "12px 24px";
-button.style.backgroundColor = "#0078D4";
-button.style.color = "white";
-button.style.textDecoration = "none";
-button.style.borderRadius = "6px";
-button.style.fontSize = "16px";
-button.style.fontWeight = "bold";
-button.style.transition = "background-color 0.3s ease";
-button.style.marginBottom = "20px";
-button.style.cursor = "pointer";
-}
-
+        if (saveRes.ok) {
+          alert("✅ Kanban info loaded and saved successfully!");
+        } else {
+          alert("⚠️ Failed to save kanban info.");
+        }
+      } catch (error) {
+        console.error("❌ Error during load/save:", error);
+        alert("An error occurred while loading and saving tasks.");
+      } finally {
+        spinner.style.display = "none";
+      }
+    }
 
     fetchTeams();
   </script>

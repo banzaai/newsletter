@@ -19,7 +19,7 @@ model = AzureChatOpenAI(
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
     azure_deployment=os.getenv("DEPLOYMENT_NAME"),
     openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-05-01-preview"),
-    temperature=float(os.getenv("TEMPERATURE", 0.8)),
+    temperature=float(os.getenv("TEMPERATURE", 1)),
 )
 
 embeddings = AzureOpenAIEmbeddings(

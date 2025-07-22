@@ -1,272 +1,30 @@
-from typing import Annotated, Dict, List, Optional
-from fastapi import APIRouter, Body, FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
+import re
+from typing import Annotated, Optional
+from fastapi import APIRouter, Body, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from langchain_chroma import Chroma
-import msal
-import requests
 import os
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
-import db
-from langgraph.graph import StateGraph, MessagesState, START
-from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_core.prompts.chat import MessagesPlaceholder, ChatPromptTemplate
-from config import model, embeddings
-from typing import TypedDict, List
-from langchain_core.messages import BaseMessage
+from config import embeddings
 import markdown
-from langchain.agents import initialize_agent, AgentType
-from langchain.tools import tool
 import os
 import tempfile
 import uuid
+from fastapi import APIRouter, Body
+from fastapi.responses import HTMLResponse
+from typing import Annotated
+from langchain.schema import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import Chroma
+from kanban.classes import TaskList, get_access_token, get_buckets, get_plans, get_task_details, get_tasks, get_teams
+from labels import Category
+from kanban.classes import app 
+from kanban.plot import filename
 
-
-load_dotenv()
+load_dotenv(override=True)
 
 router = APIRouter()
 
-CLIENT_ID = os.getenv("CLIENT_ID")
-TENANT_ID = os.getenv("TENANT_ID")
-AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
-SCOPES = ["Group.Read.All", "Tasks.Read"]
-CACHE_FILE = os.getenv("CACHE_FILE")
-TOKEN_CACHE = os.getenv("TOKEN_CACHE")
-
-filename_real = None
-@tool
-def generate_plot(data_json: str, plot_type: str = "line") -> dict:
-    """
-    Generates a plot from JSON data and saves it to a temporary file.
-    Returns a dictionary with the filename and a short description.
-    """
-    import json
-    import matplotlib.pyplot as plt
-    global filename_real
-    data = json.loads(data_json)
-    plt.figure()
-    if plot_type == "line":
-        plt.plot(data["x"], data["y"])
-    elif plot_type == "bar":
-        plt.bar(data["x"], data["y"])
-
-    # Generate a unique filename
-    filename = f"{uuid.uuid4().hex}.png"
-    temp_dir = tempfile.gettempdir()
-    file_path = os.path.join(temp_dir, filename)
-    plt.savefig(file_path)
-    print(f'filename is {filename}')
-    filename_real = filename 
-    return {
-        "text": "Plot saved to temporary file."
-    }
-
-
-class MyState(MessagesState):
-    context: str = Field(default="")
-
-prompt_template = ChatPromptTemplate.from_messages(
-    [
-        (
-
-        "system",
-        
-            f"""
-
-                You are a highly intelligent, context-aware chatbot designed to assist with task management queries.
-                Always respond in full sentences, providing complete and clear information based on the context provided.
-                You are aware of the full message history and the current query.
-
-                ### 🎯 Your Objective
-
-                Your job is to:
-                1. **Understand the current query:** in the context of the full message history.
-                2. **Analyze the task context: {{context}}** to extract relevant and accurate information.
-                3. **Respond** Always respond in full sentences, providing complete and clear information based on the context provided.
-                4. Responses should be in markdown format with appropriate headings and bullet points where necessary.
-                5. **Use the tools available** to generate plots or visualizations if especifically asked for.
-                ---
-
-                IMPORTANT: 
-                -All people who appear in the context are on the bench regardless of their tasks completion status.
-                
-                
-                When calling the `generate_plot` tool:
-                - Always pass a JSON string with **two keys**: `"x"` and `"y"`.
-                - `"x"` should be a list of labels (e.g., names of people).
-                - `"y"` should be a list of corresponding numeric values (e.g., task counts).
-                - Example: `"x": ["Alice", "Bob"], "y": [3, 5]`
-
-            
-                                                   
-
-                
-
-                ---
-
-                ### ⚠️ Edge Cases
-
-                - If the query is **ambiguous**, ask a clarifying question.
-                - If the **context is empty**, respond with:
-                > "Please specify the query in a different way or provide more context."
-
-                """
-        ), MessagesPlaceholder(variable_name="messages")
-    ]
-)
-
-agent_executor = initialize_agent(
-    tools=[generate_plot],
-    llm=model,
-    agent=AgentType.OPENAI_FUNCTIONS,
-    verbose=True,
-)
-
-# Define the graph globally (outside the endpoint)
-workflow = StateGraph(MyState)
-
-def call_model(state: MyState):
-    prompt = prompt_template.invoke(state)
-    response = agent_executor.run(prompt.to_string())
-    print(response)
-    if 'filename' in response[-1]:
-        print('IN HEREEEEEEEEEEE')
-        return {
-            "messages": [
-                {
-                    "text": response["text"],
-                    "filename": response["filename"]
-                }
-            ]
-        }
-    else:
-        return {"messages": [response]}
-
-
-workflow.add_node("model", call_model)
-workflow.set_entry_point("model")  # or use add_edge(START, "model") if START is defined
-app = workflow.compile(checkpointer=MemorySaver())
-
-
-class ChecklistItem(BaseModel):
-    title: str
-
-class TaskDetails(BaseModel):
-    description: Optional[str] = None
-    checklist: Optional[Dict[str, ChecklistItem]] = {}
-
-class Task(BaseModel):
-    id: str
-    title: str
-    bucketName: str
-    percentComplete: Optional[int] = 0
-    priority: Optional[int] = None
-    details: TaskDetails
-
-class TaskList(BaseModel):
-    tasks: List[Task]
-
-
-def load_cache():
-    try:
-        cache = msal.SerializableTokenCache()
-        if TOKEN_CACHE:
-            # Deserialize directly from the string
-            cache.deserialize(TOKEN_CACHE)
-        elif os.path.exists(CACHE_FILE):
-            with open(CACHE_FILE, "r") as f:
-                cache.deserialize(f.read())
-        return cache
-    except Exception as e:
-        raise RuntimeError(f"Error loading token cache: {e}")
-
-
-def save_cache(cache):
-    try:
-        if cache.has_state_changed:
-            # Save to file
-            with open(CACHE_FILE, "w") as f:
-                f.write(cache.serialize())
-
-            # Also print to console for manual copy-paste into Render env var
-            print("🔐 Updated TOKEN_CACHE (copy this to Render env var):")
-            print(cache.serialize())
-    except Exception as e:
-        raise RuntimeError(f"Error saving token cache: {e}")
-
-
-def get_access_token():
-    try:
-        cache = load_cache()
-        app_msal = msal.PublicClientApplication(CLIENT_ID, authority=AUTHORITY, token_cache=cache)
-        accounts = app_msal.get_accounts()
-        if accounts:
-            result = app_msal.acquire_token_silent(SCOPES, account=accounts[0])
-        else:
-            flow = app_msal.initiate_device_flow(scopes=SCOPES)
-            if "user_code" not in flow:
-                raise ValueError("Failed to create device flow")
-            print(flow["message"])
-            result = app_msal.acquire_token_by_device_flow(flow)
-        save_cache(cache)
-        if "access_token" in result:
-            return result["access_token"]
-        else:
-            return None
-    except Exception as e:
-        raise RuntimeError(f"Authentication error: {e}")
-
-def get_teams(token):
-    try:
-        url = "https://graph.microsoft.com/v1.0/groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')"
-        headers = {'Authorization': f'Bearer {token}'}
-        r = requests.get(url, headers=headers)
-        r.raise_for_status()
-        return r.json().get('value', [])
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch teams: {e}")
-
-def get_plans(token, group_id):
-    try:
-        url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/planner/plans"
-        headers = {'Authorization': f'Bearer {token}'}
-        r = requests.get(url, headers=headers)
-        r.raise_for_status()
-        return r.json().get('value', [])
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch plans: {e}")
-
-def get_tasks(token, plan_id):
-    try:
-        url = f"https://graph.microsoft.com/v1.0/planner/plans/{plan_id}/tasks"
-        headers = {'Authorization': f'Bearer {token}'}
-        r = requests.get(url, headers=headers)
-        r.raise_for_status()
-        return r.json().get('value', [])
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch tasks: {e}")
-
-def get_task_details(token, task_id):
-    try:
-        url = f"https://graph.microsoft.com/v1.0/planner/tasks/{task_id}/details"
-        headers = {'Authorization': f'Bearer {token}'}
-        r = requests.get(url, headers=headers)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch task details: {e}")
-
-def get_bucket_name(token, bucket_id):
-    try:
-        url = f"https://graph.microsoft.com/v1.0/planner/buckets/{bucket_id}"
-        headers = {'Authorization': f'Bearer {token}'}
-        r = requests.get(url, headers=headers)
-        r.raise_for_status()
-        return r.json().get("name")
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch bucket name: {e}")
 
 @router.get("/teams/")
 def api_get_teams():
@@ -282,7 +40,6 @@ def api_get_teams():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.get("/plans/{team_id}/")
 def api_get_plans(team_id: str):
     try:
@@ -296,80 +53,248 @@ def api_get_tasks(plan_id: str):
     try:
         token = get_access_token()
         tasks = get_tasks(token, plan_id)
+        buckets = get_buckets(token, plan_id)
+        bucket_map = {b['id']: b['name'] for b in buckets}
         enriched = []
         for task in tasks:
-            bucket = get_bucket_name(token, task['bucketId'])
+            bucket_name = bucket_map.get(task['bucketId'], "Unknown")
             details = get_task_details(token, task['id'])
-            task['bucketName'] = bucket
-            task['details'] = details
+            task['bucketName'] = bucket_name
+            task['details'] = details 
             enriched.append(task)
         return enriched
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.post("/save_kanban_info/", response_class=HTMLResponse)
 async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
-    """
-    Endpoint to save kanban information.
-    This endpoint is used to save the user's kanban information.
-    """
-    db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
+    print('📥 Received request to save kanban info')
 
     try:
-        texts = []
+        # Clear and reinitialize the vector store
+        db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
+        db.delete_collection()
+        db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
+
+        docs = []
+
         for task in task_list.tasks:
+            bucket_name = task.bucketName
+            on_bench = not (bucket_name.startswith("[") and bucket_name.endswith("]"))
+            bench_status = "On the bench" if on_bench else "Not on the bench"
+
+            description = task.details.description if task.details and task.details.description else "No description."
             checklist_items = "\n".join(
                 f"- {item.title}" for item in task.details.checklist.values()
             ) if task.details and task.details.checklist else "No checklist items."
 
-            task_text = (
-                f"Task ID: {task.id}\n"
-                f"Title: {task.title}\n"
-                f"Bucket: {task.bucketName}\n"
-                f"Completion: {task.percentComplete}%\n"
-                f"Priority: {task.priority if task.priority is not None else 'Not set'}\n"
-                f"Description: {task.details.description if task.details and task.details.description else 'No description.'}\n"
-                f"Checklist:\n{checklist_items}"
+            labels = ", ".join(Category[key].value for key in task.appliedCategories.keys()) if task.appliedCategories else "No labels"
+            assignees = list(task.assignments.keys()) if task.assignments else []
+
+            summary = (
+                f"### Task: {task.title}\n"
+                f"- person: {bucket_name}\n"
+                f"- bench_status: {bench_status}\n"
+                f"- Start: {task.startDateTime or 'N/A'} | Due: {task.dueDateTime or 'N/A'}\n"
+                f"- Priority: {task.priority} | Completed: {task.percentComplete}%\n"
+                f"- Assigned to: {', '.join(assignees) if assignees else 'Unassigned'}\n"
+                f"- Labels: {labels}\n"
+                f"- Description: {description}\n"
+                f"- Checklist:\n{checklist_items}\n"
             )
-            texts.append(task_text)
-        
-        db.add_texts(texts)
+
+            doc = Document(
+                page_content=summary,
+                metadata={
+                    "person": bucket_name,
+                    "bench_status": bench_status,
+                    "assignees": ", ".join(assignees),
+                    "priority": task.priority,
+                    "percent_complete": task.percentComplete,
+                    "start": task.startDateTime,
+                    "due": task.dueDateTime,
+                    "has_description": bool(description.strip()),
+                    "has_checklist": bool(task.details and task.details.checklist),
+                    "labels": str(labels.split(", ")) if labels != "No labels" else ''
+                }
+            )
+
+            docs.append(doc)
+
+        # Optional: Chunk long documents if needed
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=50)
+        chunked_docs = text_splitter.split_documents(docs)
+
+        db.add_documents(chunked_docs)
+
+        print(f"✅ Added {len(chunked_docs)} documents to vector store.")
+        return HTMLResponse(content="Kanban information saved successfully.")
 
     except Exception as e:
+        print(f"❌ Error during kanban save: {e}")
         return HTMLResponse(content=f"Error saving kanban information: {e}")
-    
+
+from fastapi.responses import JSONResponse
+import uuid
 
 @router.get("/kanban_query/")
 async def kanban_query(
     query: Annotated[str, Query(description="Query to search in the kanban")],
-
 ):
-    print('I am here in the kanban query function')
+    print('🔍 Entered /kanban_query/ endpoint')
     print(f"Received query: {query}")
-    global filename_real
-    # Load context from vector DB
-    db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
-    raw_docs = db.get()['documents']
-    if not raw_docs:
-        return JSONResponse(content={"message": "No kanban data available."})
-    context = "\n".join(raw_docs)
+    global filename
+    query = preprocess_query(query)
 
-    result = app.invoke({"messages": query, "context":context}, config={"configurable": {"thread_id": "1"}})
-    response = result["messages"][-1].content if result else "No results found."
-    response_markdown = markdown.markdown(response)
-    return JSONResponse(content={'html': response_markdown,
-                                 'filename': filename_real})
+    try:
+        # Load vector store and retrieve relevant documents
+        db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
+        retriever = db.as_retriever(search_kwargs={"k": 100})
+        docs = retriever.get_relevant_documents(query)
+
+        def build_context(doc_batch):
+            blocks = []
+            for doc in doc_batch:
+                person = doc.metadata.get("person", "Unknown")
+                bench_status = doc.metadata.get("bench_status", "Unknown")
+                assignees = doc.metadata.get("assignees", "Unassigned")
+                priority = doc.metadata.get("priority", "Unknown")
+                percent_complete = doc.metadata.get("percent_complete", "Unknown")
+                labels = ", ".join(doc.metadata.get("labels", []))
+                summary = doc.page_content.strip()
+
+                block = (
+                    f"### {person}\n"
+                    f"- Bench Status: {bench_status}\n"
+                    f"- Assignees: {assignees}\n"
+                    f"- Priority: {priority}\n"
+                    f"- Completion: {percent_complete}%\n"
+                    f"- Labels: {labels}\n\n"
+                    f"{summary}\n"
+                    f"{'-'*40}"
+                )
+                blocks.append(block)
+            return "\n\n".join(blocks)
+
+        # Batch processing
+        batch_size = 30
+        batch_summaries = []
+
+        for i in range(0, len(docs), batch_size):
+            batch = docs[i:i + batch_size]
+            context = build_context(batch)
+
+            result = app.invoke(
+                {"messages": query, "context": context},
+                config={"configurable": {"thread_id": str(uuid.uuid4())}}  # Stateless
+            )
+            summary = result["messages"][-1].content if result else "No summary"
+            batch_summaries.append(summary)
+
+        # Final synthesis with memory (optional)
+        final_context = "\n\n".join(batch_summaries)
+        final_result = app.invoke(
+            {"messages": query, "context": final_context},
+            config={"configurable": {"thread_id": "kanban-final"}}
+        )
+        response = final_result["messages"][-1].content if final_result else "No results found."
+        response_markdown = markdown.markdown(response)
+
+        return JSONResponse(content={'html': response_markdown, 'filename': filename})
+
+    except Exception as e:
+        print(f"❌ Error during kanban query: {e}")
+        return JSONResponse(content={"message": f"Error during kanban query: {e}"})
+
+
+def preprocess_query(query: str) -> str:
+    """
+    Enhance the query by normalizing, removing punctuation,
+    mapping synonyms to canonical terms, and detecting simple patterns.
+    """
+    # Normalize case and remove punctuation
+    query = query.lower()
+    query = re.sub(r"[^\w\s]", "", query)
+    query = query.strip()
+
+    # Synonym mapping
+    synonyms = {
+        "not done": "incomplete",
+        "unfinished": "incomplete",
+        "not completed": "incomplete",
+        "done": "complete",
+        "finished": "complete",
+        "idle": "on the bench",
+        "available": "on the bench",
+        "working": "not on the bench",
+        "busy": "not on the bench",
+        "assigned to": "for",
+        "responsible for": "for"
+    }
+
+    for phrase, replacement in synonyms.items():
+        query = query.replace(phrase, replacement)
+
+    return query
+
 
 @router.get("/plot")
-def get_plot(filename: str = Query(...)):
-    global filename_real
+def get_plot(filename_: str = Query(...)):
+    global filename
     temp_dir = tempfile.gettempdir()
-    file_path = os.path.join(temp_dir, filename)
+    file_path = os.path.join(temp_dir, filename_)
 
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
-    filename_real=None
+    filename=None
     return FileResponse(file_path, media_type="image/png")
+
+
+##############################################################
+from fastapi.responses import JSONResponse
+from fastapi import Query
+from typing import Optional, Annotated
+
+@router.get("/kanban_query_filtered/")
+async def kanban_query_filtered(
+    bencher: Annotated[Optional[str], Query(description="Filter by assignee name")] = None,
+    incomplete_only: Annotated[bool, Query(description="Only include tasks with percentComplete < 100")] = False,
+):
+    print("🔍 Entered /kanban_query_filtered/ endpoint")
+
+    # Load vector DB
+    db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
+
+    # Build metadata filter
+    metadata_filter = {}
+    # Build a natural-language summary of the filters
+    filter_descriptions = []
+    if bencher:
+        filter_descriptions.append(f"assigned to **{bencher}**")
+    if incomplete_only:
+        filter_descriptions.append("with less than 100% completion")
+
+    if filter_descriptions:
+        filter_summary = "Showing tasks " + " and ".join(filter_descriptions) + "."
+    else:
+        filter_summary = "Showing all tasks."
+
+
+    try:
+        # Retrieve documents using metadata filtering
+        filtered_docs = db.get(where=metadata_filter)
+    except Exception as e:
+        return JSONResponse(content={"message": f"Metadata filtering failed: {e}"}, status_code=500)
+
+    if not filtered_docs or not filtered_docs.get("documents"):
+        return JSONResponse(content={"message": "No matching tasks found."}, status_code=404)
+    print("✅ Returning filtered docs:", filtered_docs)
+
+    # Return the raw documents and metadata
+    return JSONResponse(content={
+        "message": filter_summary,
+        "documents": filtered_docs.get("documents"),
+        "metadatas": filtered_docs.get("metadatas")
+    })
 
 
