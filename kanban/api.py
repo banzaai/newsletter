@@ -120,7 +120,7 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
             docs.append(doc)
 
         # Optional: Chunk long documents if needed
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=100, chunk_overlap=50)
         chunked_docs = text_splitter.split_documents(docs)
 
         db.add_documents(chunked_docs)
@@ -217,9 +217,7 @@ def get_plot(filename_: str = Query(...)):
 
 
 ##############################################################
-from fastapi.responses import JSONResponse
-from fastapi import Query
-from typing import Optional, Annotated
+
 
 @router.get("/kanban_query_filtered/")
 async def kanban_query_filtered(
@@ -232,35 +230,40 @@ async def kanban_query_filtered(
     db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
 
     # Build metadata filter
-    metadata_filter = {}
-    # Build a natural-language summary of the filters
+    filter_conditions = []
     filter_descriptions = []
+
     if bencher:
+        filter_conditions.append({"person": {"$eq": bencher}})
         filter_descriptions.append(f"assigned to **{bencher}**")
+
     if incomplete_only:
+        filter_conditions.append({"percent_complete": {"$lt": 100}})
         filter_descriptions.append("with less than 100% completion")
 
-    if filter_descriptions:
-        filter_summary = "Showing tasks " + " and ".join(filter_descriptions) + "."
-    else:
-        filter_summary = "Showing all tasks."
-
+    metadata_filter = {"$and": filter_conditions} if filter_conditions else {}
+    filter_summary = (
+        "Showing tasks " + " and ".join(filter_descriptions) + "."
+        if filter_descriptions else "Showing all tasks."
+    )
 
     try:
-        # Retrieve documents using metadata filtering
-        filtered_docs = db.get(where=metadata_filter)
+        print("📦 Metadata filter:", metadata_filter)
+        filtered_docs = db.get(where=metadata_filter) if metadata_filter else db.get()
     except Exception as e:
+        print("❌ Error during metadata filtering:", e)
         return JSONResponse(content={"message": f"Metadata filtering failed: {e}"}, status_code=500)
 
     if not filtered_docs or not filtered_docs.get("documents"):
         return JSONResponse(content={"message": "No matching tasks found."}, status_code=404)
+
     print("✅ Returning filtered docs:", filtered_docs)
 
-    # Return the raw documents and metadata
-    return JSONResponse(content={
-        "message": filter_summary,
-        "documents": filtered_docs.get("documents"),
-        "metadatas": filtered_docs.get("metadatas")
-    })
+    final_result = app.invoke(
+        {"messages": filter_summary, "context":filtered_docs},
+        config={"configurable": {"thread_id": str(uuid.uuid4())}}
+    )
+    response = final_result["messages"][-1].content if final_result else "No results found."
+    response_markdown = markdown.markdown(response)
 
-
+    return JSONResponse(content={'html': response_markdown, 'filename': filename})

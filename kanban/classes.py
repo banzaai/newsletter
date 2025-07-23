@@ -15,6 +15,7 @@ import traceback
 from kanban.plot import generate_plot
 
 
+
 class MyState(MessagesState):
     context: str = Field(default="")
 
@@ -160,7 +161,6 @@ workflow = StateGraph(MyState)
 def call_model(state: MyState):
     prompt = prompt_template.invoke(state)
     response = agent_executor.run(prompt.to_string())
-    print(response)
     if 'filename' in response[-1]:
         return {
             "messages": [
