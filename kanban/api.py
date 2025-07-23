@@ -89,7 +89,6 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
             ) if task.details and task.details.checklist else "No checklist items."
 
             labels = ", ".join(Category[key].value for key in task.appliedCategories.keys()) if task.appliedCategories else "No labels"
-            assignees = list(task.assignments.keys()) if task.assignments else []
 
             summary = (
                 f"### Task: {task.title}\n"
@@ -173,7 +172,7 @@ async def kanban_query(
             return "\n\n".join(blocks)
 
         # Batch processing
-        batch_size = 40
+        batch_size = 20
         batch_summaries = []
 
         for i in range(0, len(docs), batch_size):
