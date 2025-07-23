@@ -16,7 +16,7 @@ from typing import Annotated
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
-from kanban.classes import TaskList, get_access_token, get_buckets, get_plans, get_task_details, get_tasks, get_teams
+from kanban.classes import TaskList, get_access_token, get_buckets, get_plans, get_task_details, get_tasks, get_teams, preprocess_query
 from labels import Category
 from kanban.classes import app 
 from kanban.plot import filename
@@ -97,7 +97,6 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
                 f"- bench_status: {bench_status}\n"
                 f"- Start: {task.startDateTime or 'N/A'} | Due: {task.dueDateTime or 'N/A'}\n"
                 f"- Priority: {task.priority} | Completed: {task.percentComplete}%\n"
-                f"- Assigned to: {', '.join(assignees) if assignees else 'Unassigned'}\n"
                 f"- Labels: {labels}\n"
                 f"- Description: {description}\n"
                 f"- Checklist:\n{checklist_items}\n"
@@ -108,7 +107,6 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
                 metadata={
                     "person": bucket_name,
                     "bench_status": bench_status,
-                    "assignees": ", ".join(assignees),
                     "priority": task.priority,
                     "percent_complete": task.percentComplete,
                     "start": task.startDateTime,
@@ -122,7 +120,7 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
             docs.append(doc)
 
         # Optional: Chunk long documents if needed
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=50)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         chunked_docs = text_splitter.split_documents(docs)
 
         db.add_documents(chunked_docs)
@@ -150,23 +148,21 @@ async def kanban_query(
         # Load vector store and retrieve relevant documents
         db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
         retriever = db.as_retriever(search_kwargs={"k": 100})
-        docs = retriever.get_relevant_documents(query)
+        docs = retriever.invoke(query)
 
         def build_context(doc_batch):
             blocks = []
             for doc in doc_batch:
                 person = doc.metadata.get("person", "Unknown")
                 bench_status = doc.metadata.get("bench_status", "Unknown")
-                assignees = doc.metadata.get("assignees", "Unassigned")
                 priority = doc.metadata.get("priority", "Unknown")
                 percent_complete = doc.metadata.get("percent_complete", "Unknown")
                 labels = ", ".join(doc.metadata.get("labels", []))
                 summary = doc.page_content.strip()
 
                 block = (
-                    f"### {person}\n"
+                    f"### Name person bench: {person}\n"
                     f"- Bench Status: {bench_status}\n"
-                    f"- Assignees: {assignees}\n"
                     f"- Priority: {priority}\n"
                     f"- Completion: {percent_complete}%\n"
                     f"- Labels: {labels}\n\n"
@@ -177,7 +173,7 @@ async def kanban_query(
             return "\n\n".join(blocks)
 
         # Batch processing
-        batch_size = 30
+        batch_size = 40
         batch_summaries = []
 
         for i in range(0, len(docs), batch_size):
@@ -186,7 +182,7 @@ async def kanban_query(
 
             result = app.invoke(
                 {"messages": query, "context": context},
-                config={"configurable": {"thread_id": str(uuid.uuid4())}}  # Stateless
+                config={"configurable": {"thread_id": str(uuid.uuid4())}}  
             )
             summary = result["messages"][-1].content if result else "No summary"
             batch_summaries.append(summary)
@@ -206,36 +202,6 @@ async def kanban_query(
         print(f"❌ Error during kanban query: {e}")
         return JSONResponse(content={"message": f"Error during kanban query: {e}"})
 
-
-def preprocess_query(query: str) -> str:
-    """
-    Enhance the query by normalizing, removing punctuation,
-    mapping synonyms to canonical terms, and detecting simple patterns.
-    """
-    # Normalize case and remove punctuation
-    query = query.lower()
-    query = re.sub(r"[^\w\s]", "", query)
-    query = query.strip()
-
-    # Synonym mapping
-    synonyms = {
-        "not done": "incomplete",
-        "unfinished": "incomplete",
-        "not completed": "incomplete",
-        "done": "complete",
-        "finished": "complete",
-        "idle": "on the bench",
-        "available": "on the bench",
-        "working": "not on the bench",
-        "busy": "not on the bench",
-        "assigned to": "for",
-        "responsible for": "for"
-    }
-
-    for phrase, replacement in synonyms.items():
-        query = query.replace(phrase, replacement)
-
-    return query
 
 
 @router.get("/plot")

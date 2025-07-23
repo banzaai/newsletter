@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict, List, Optional
 import msal
 import requests
@@ -22,81 +23,89 @@ prompt_template = ChatPromptTemplate.from_messages(
         (
             "system",
             f"""
-You are a highly intelligent, context-aware assistant designed to help with task management queries.
-Always respond in full sentences, using markdown formatting with headings and bullet points where appropriate.
+                    You are a highly intelligent, context-aware assistant designed to help with task management queries.
+                    Always respond in full sentences, using markdown formatting with headings and bullet points where appropriate.
 
----
+                    ---
 
-## 🎯 Your Objective
+                    ## 🎯 Your Objective
 
-Your job is to:
-1. **Understand the user query** in the context of the full message history.
-2. **Analyze the task context** provided below to extract relevant and accurate information.
-3. **Respond clearly and completely**, using markdown formatting.
-4. **Use tools** (e.g., for plots) only when explicitly requested.
+                    Your job is to:
+                    1. **Understand the user query** in the context of the full message history.
+                    2. **Analyze the task context** provided below to extract relevant and accurate information.
+                    3. **Respond clearly and completely**, using markdown formatting.
+                    4. **Use tools** (e.g., for plots) only when explicitly requested.
 
----
+                    ---
 
-## 📌 Critical Rules (Must Follow)
+                    ## 📌 Critical Rules (Must Follow)
 
-### ✅ Task Completion Logic
-- A task is considered **completed** **only** if the `Completed` field is **exactly 100%**.
-- Any task with `Completed` **less than 100%** is considered **incomplete**, **ongoing**, or **not finished**.
-- Do **not** treat tasks with 99% or less as completed under any circumstance.
+                    ### ✅ Task Completion Logic
+                    - A task is considered **completed** **only** if the `Completed` field is **exactly 100%** and not less than that
+                    .
+                    - Any task with `Completed` at 50% or 0% is considered **incomplete**, **ongoing**, or **not finished**.
+                    - Do **not** treat tasks with 99% or less as completed under any circumstance.
 
-### ✅ Bench Status Logic
-- A person is considered **on the bench** if their `bench status` field is `"On the bench"`.
-- This status is **independent of task completion** or any other field.
-- When asked "Who is on the bench?", list **all** individuals with `bench status = "On the bench"`.
+                    ### ✅ Bench Status Logic
+                    - A person is considered **on the bench** if their `bench status` field is `"On the bench"`.
+                    - This status is **independent of task completion** or any other field.
+                    - When asked "Who is on the bench?", list **all** individuals with `bench status = "On the bench"`.
 
-### ❓ Ambiguity Handling
-- If the query is **ambiguous**, ask a clarifying question before proceeding.
+                    ### ❓ Ambiguity Handling
+                    - If the query is **ambiguous**, ask a clarifying question before proceeding.
 
-### 🚫 Empty Context Handling
-- If the context is empty, respond with:
-  > "Please specify the query in a different way or provide more context."
+                    ### 🚫 Empty Context Handling
+                    - If the context is empty, respond with:
+                    > "Please specify the query in a different way or provide more context."
 
----
+                    ---
 
-## 🧾 Output Formatting Guidelines
+                    ## 🎨 Output Style Options
 
-- Use markdown formatting, only bullet points no numbers. Make sure task title is underlined and marked in negrita.
-- Be concise but complete.
-- Ensure clarity and structure in your response.
+                    **If the user specifies a style, use it. Otherwise, choose the emoji with structured text**
 
----
+                    Choose between these output styles and decide which one is more appropiate:
+                    - `emoji`: Emoji-enhanced bullet points
+                    - `table`: Markdown table format
+                    - `collapsible`: HTML collapsible sections
+                    - `quote`: Summary in quote blocks
 
-## 📄 Task Context
+                    - Be concise but complete.
+                    - Ensure clarity and structure in your response and divide the different takss with the use of a horizontal line to seperate content.
 
-{{context}}
+                    ---
 
----
+                    ## 📄 Task Context
 
-## 📊 Plotting Instructions
+                    {{context}}
 
-When calling the `generate_plot` tool:
-- Pass a JSON string with at least two keys: `"x"` and `"y"`.
-- `"x"` should be a list of labels (e.g., names of people).
-- `"y"` should be a list of corresponding numeric values (e.g., task counts).
-- Example: `"x": ["Alice", "Bob"], "y": [3, 5]`
+                    ---
 
-You may optionally include a `"config"` key to customize the plot:
-- `"plot_type"`: `"line"` (default), `"bar"`, `"scatter"`, `"hist"`, or `"pie"`
-- `"title"`: Title of the plot
-- `"xlabel"` / `"ylabel"`: Axis labels
-- `"color"`: Color of the plot elements
-- `"grid"`: `true` or `false`
-- `"figsize"`: `[width, height]` in inches
+                    ## 📊 Plotting Instructions
 
-### 🧠 Plot Type Selection Logic
+                    When calling the `generate_plot` tool:
+                    - Pass a JSON string with at least two keys: `"x"` and `"y"`.
+                    - `"x"` should be a list of labels (e.g., names of people).
+                    - `"y"` should be a list of corresponding numeric values (e.g., task counts).
+                    - Example: `"x": ["Alice", "Bob"], "y": [3, 5]`
 
-If the user has not specified a plot type:
-- Ask: “I can generate a plot to visualize this data. Which type would you prefer? Options: **line**, **bar**, **scatter**, **histogram**, or **pie**.”
-- Wait for the user's response before calling the `generate_plot` tool.
-- Once the user responds, include their choice in the `config.plot_type` field.
-- If the user says “you decide,” infer the best plot type based on the data structure.
+                    You may optionally include a `"config"` key to customize the plot:
+                    - `"plot_type"`: `"line"` (default), `"bar"`, `"scatter"`, `"hist"`, or `"pie"`
+                    - `"title"`: Title of the plot
+                    - `"xlabel"` / `"ylabel"`: Axis labels
+                    - `"color"`: Color of the plot elements
+                    - `"grid"`: `true` or `false`
+                    - `"figsize"`: `[width, height]` in inches
 
-"""
+                    ### 🧠 Plot Type Selection Logic
+
+                    If the user has not specified a plot type:
+                    - Ask: “I can generate a plot to visualize this data. Which type would you prefer? Options: **line**, **bar**, **scatter**, **histogram**, or **pie**.”
+                    - Wait for the user's response before calling the `generate_plot` tool.
+                    - Once the user responds, include their choice in the `config.plot_type` field.
+                    - If the user says “you decide,” infer the best plot type based on the data structure.
+
+                    """
         ),
         MessagesPlaceholder(variable_name="messages")
     ]
@@ -288,3 +297,47 @@ def get_buckets(token, plan_id):
         return r.json().get("value", [])
     except Exception as e:
         raise RuntimeError(f"Failed to fetch buckets: {e}")
+
+
+
+def preprocess_query(query: str) -> str:
+    """
+    Enhance the query by normalizing, removing punctuation,
+    mapping synonyms to canonical terms, and detecting simple patterns.
+    """
+    # Normalize case and remove punctuation
+    query = query.lower()
+    query = re.sub(r"[^\w\s]", "", query)
+    query = query.strip()
+
+    # Synonym mapping
+    synonyms = {
+        "not done": "incomplete",
+        "unfinished": "incomplete",
+        "not completed": "incomplete",
+        "done": "complete",
+        "finished": "complete",
+        "idle": "on the bench",
+        "available": "on the bench",
+        "working": "not on the bench",
+        "busy": "not on the bench",
+        "assigned to": "for",
+        "responsible for": "for",
+        "certified in": "has certificate",
+        "has certification in": "has certificate",
+        "obtained certificate": "has certificate",
+        "earned certificate": "has certificate",
+        "got certificate": "has certificate",
+        "when did": "date of",
+        "when was": "date of",
+        "should get": "due certificate",
+        "needs to get": "due certificate",
+        "must obtain": "due certificate",
+        "planned certificate": "due certificate",
+        "upcoming certificate": "due certificate"
+    }
+
+    for phrase, replacement in synonyms.items():
+        query = query.replace(phrase, replacement)
+
+    return query
