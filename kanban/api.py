@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Annotated, Optional
 from fastapi import APIRouter, Body, HTTPException, Query
@@ -16,10 +17,13 @@ from typing import Annotated
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
-from kanban.classes import TaskList, get_access_token, get_buckets, get_plans, get_task_details, get_tasks, get_teams, preprocess_query
+from kanban.classes import TaskList, build_context, build_document, get_access_token, get_buckets, get_plans, get_task_details, get_tasks, get_teams, handle_date_query, preprocess_query, summarize_batches, synthesize_summary
 from labels import Category
 from kanban.classes import app 
 from kanban.plot import filename
+from langgraph.graph import StateGraph, MessagesState
+from fastapi.responses import JSONResponse
+import uuid
 
 load_dotenv(override=True)
 
@@ -71,55 +75,14 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
     print('📥 Received request to save kanban info')
 
     try:
-        # Clear and reinitialize the vector store
         db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
-        db.delete_collection()
+        db.delete_collection()  # Consider specifying collection name if needed
         db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
 
-        docs = []
+        docs = [build_document(task) for task in task_list.tasks]
 
-        for task in task_list.tasks:
-            bucket_name = task.bucketName
-            on_bench = not (bucket_name.startswith("[") and bucket_name.endswith("]"))
-            bench_status = "On the bench" if on_bench else "Not on the bench"
-
-            description = task.details.description if task.details and task.details.description else "No description."
-            checklist_items = "\n".join(
-                f"- {item.title}" for item in task.details.checklist.values()
-            ) if task.details and task.details.checklist else "No checklist items."
-
-            labels = ", ".join(Category[key].value for key in task.appliedCategories.keys()) if task.appliedCategories else "No labels"
-
-            summary = (
-                f"### Task: {task.title}\n"
-                f"- person: {bucket_name}\n"
-                f"- bench_status: {bench_status}\n"
-                f"- Start: {task.startDateTime or 'N/A'} | Due: {task.dueDateTime or 'N/A'}\n"
-                f"- Priority: {task.priority} | Completed: {task.percentComplete}%\n"
-                f"- Labels: {labels}\n"
-                f"- Description: {description}\n"
-                f"- Checklist:\n{checklist_items}\n"
-            )
-
-            doc = Document(
-                page_content=summary,
-                metadata={
-                    "person": bucket_name,
-                    "bench_status": bench_status,
-                    "priority": task.priority,
-                    "percent_complete": task.percentComplete,
-                    "start": task.startDateTime,
-                    "due": task.dueDateTime,
-                    "has_description": bool(description.strip()),
-                    "has_checklist": bool(task.details and task.details.checklist),
-                    "labels": str(labels.split(", ")) if labels != "No labels" else ''
-                }
-            )
-
-            docs.append(doc)
-
-        # Optional: Chunk long documents if needed
-        text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=100, chunk_overlap=50)
+        # Optional: Chunk long documents
+        text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=20)
         chunked_docs = text_splitter.split_documents(docs)
 
         db.add_documents(chunked_docs)
@@ -127,80 +90,49 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
         print(f"✅ Added {len(chunked_docs)} documents to vector store.")
         return HTMLResponse(content="Kanban information saved successfully.")
 
+
     except Exception as e:
         print(f"❌ Error during kanban save: {e}")
         return HTMLResponse(content=f"Error saving kanban information: {e}")
 
-from fastapi.responses import JSONResponse
-import uuid
+
 
 @router.get("/kanban_query/")
-async def kanban_query(
-    query: Annotated[str, Query(description="Query to search in the kanban")],
-):
+async def kanban_query(query: Annotated[str, Query(description="Query to search in the kanban")]):
     print('🔍 Entered /kanban_query/ endpoint')
     print(f"Received query: {query}")
-    global filename
-    query = preprocess_query(query)
 
     try:
-        # Load vector store and retrieve relevant documents
+        query_info = preprocess_query(query)
+        query_str = query_info['cleaned_query']
+        intent = query_info.get('intent', 'general')
+
         db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
-        retriever = db.as_retriever(search_kwargs={"k": 100})
-        docs = retriever.invoke(query)
+        docs_with_scores = db.similarity_search_with_score(query_str, k = 80)
 
-        def build_context(doc_batch):
-            blocks = []
-            for doc in doc_batch:
-                person = doc.metadata.get("person", "Unknown")
-                bench_status = doc.metadata.get("bench_status", "Unknown")
-                priority = doc.metadata.get("priority", "Unknown")
-                percent_complete = doc.metadata.get("percent_complete", "Unknown")
-                labels = ", ".join(doc.metadata.get("labels", []))
-                summary = doc.page_content.strip()
+        # # Retrieve documents with scores
+        # docs_with_scores = retriever.invoke(query_str, return_score=True)
 
-                block = (
-                    f"### Name person bench: {person}\n"
-                    f"- Bench Status: {bench_status}\n"
-                    f"- Priority: {priority}\n"
-                    f"- Completion: {percent_complete}%\n"
-                    f"- Labels: {labels}\n\n"
-                    f"{summary}\n"
-                    f"{'-'*40}"
-                )
-                blocks.append(block)
-            return "\n\n".join(blocks)
+        # Filter by similarity threshold
+        threshold = 0.2
+        filtered_docs = [(doc, score) for doc, score in docs_with_scores if score >= threshold]
 
-        # Batch processing
-        batch_size = 20
-        batch_summaries = []
+        # Sort and select top N
+        top_n = 50
+        top_docs = [doc for doc, _ in sorted(filtered_docs, key=lambda x: x[1], reverse=True)[:top_n]]
+        print(top_docs)
+        if not top_docs:
+            return JSONResponse(content={"html": "No relevant documents found."})
 
-        for i in range(0, len(docs), batch_size):
-            batch = docs[i:i + batch_size]
-            context = build_context(batch)
+        batch_summaries = summarize_batches(top_docs, query_str, intent)
+        final_summary = synthesize_summary(batch_summaries, query_str)
 
-            result = app.invoke(
-                {"messages": query, "context": context},
-                config={"configurable": {"thread_id": str(uuid.uuid4())}}  
-            )
-            summary = result["messages"][-1].content if result else "No summary"
-            batch_summaries.append(summary)
-
-        # Final synthesis with memory (optional)
-        final_context = "\n\n".join(batch_summaries)
-        final_result = app.invoke(
-            {"messages": query, "context": final_context},
-            config={"configurable": {"thread_id": "kanban-final"}}
-        )
-        response = final_result["messages"][-1].content if final_result else "No results found."
-        response_markdown = markdown.markdown(response)
-
-        return JSONResponse(content={'html': response_markdown, 'filename': filename})
+        response_html = markdown.markdown(final_summary)
+        return JSONResponse(content={'html': response_html})
 
     except Exception as e:
         print(f"❌ Error during kanban query: {e}")
         return JSONResponse(content={"message": f"Error during kanban query: {e}"})
-
 
 
 @router.get("/plot")

@@ -1,6 +1,7 @@
 import json
 import re
 from typing import Any, Dict, List, Optional
+import uuid
 import msal
 import requests
 import os
@@ -14,7 +15,11 @@ from langchain.agents import initialize_agent, AgentType
 import os
 import traceback
 from kanban.plot import generate_plot
+from typing import List
+from langchain.schema import Document
+from datetime import datetime
 
+from labels import Category
 
 
 class MyState(MessagesState):
@@ -28,8 +33,9 @@ f"""
     You are a highly intelligent, context-aware assistant designed to help with task management queries.
     Always respond in full sentences, using markdown formatting with headings and bullet points where appropriate.
     
-    make a cohesive and complete answer out of the context as if you answered the question with the complete information just once.
+    make a cohesive and complete answer out of the context.
     ---
+    The context is : {{context}}
 
     ## 🎯 Your Objective
 
@@ -49,7 +55,7 @@ f"""
     - Do **not** treat tasks with 99% or less as completed under any circumstance.
 
     ### ✅ Bench Status Logic
-    - A person is considered **on the bench** if their `bench status` field is `"On the bench"`.
+    - A person is considered **on the bench** if their `bench status` field is `"On the bench"` a person is **not** considered on the bench when its bench status is = **Not on the bench**..
     - This status is **independent of task completion** or any other field.
     - When asked "Who is on the bench?", list **all** individuals with `bench status = "On the bench"`.
 
@@ -77,25 +83,10 @@ f"""
 
     ---
 
-    ## 📄 Task Context
-    Each task is summarized using the following format:
-
-    ```
-    ### Task: 
-    - person: 
-    - bench_status:
-    - Start: | Due:
-    - Priority: | Completed: %
-    - Labels: 
-    - Description:
-    - Checklist:
-
-    ```
-
     ### Field Descriptions:
     - **Task**: The title or name of the task.
     - **Person**: The individual assigned to or who completed the task.
-    - **Bench Status**: Indicates whether the person is "On the bench" or not.
+    - **Bench Status**: Indicates whether the person is "On the bench" or "Not on the bench".
     - **Start / Due**: Start and end dates of the task. If missing, shown as "N/A".
     - **Priority**: A number from 1 (low) to 5 (high) indicating task urgency.
     - **Completed**: Task completion percentage. Only 100% means the task is finished.
@@ -103,8 +94,7 @@ f"""
     - **Description**: A detailed explanation of the task’s content or purpose.
     - **Checklist**: A list of subtasks or steps related to the main task.
 
-    
-    The context is : {{context}}
+
     ---
 
     ## 📊 Plotting Instructions
@@ -364,14 +354,15 @@ def preprocess_query(query: str) -> Dict[str, str]:
     }
 
     for phrase, replacement in synonyms.items():
-        query = query.replace(phrase, replacement)
+        query = re.sub(rf"\b{re.escape(phrase)}\b", replacement, query)
+
 
     # Intent detection
     intent = "general"
     if "has certificate" in query or "due certificate" in query:
         intent = "certificate"
-    elif "date of" in query or "last" in query or "month" in query or "week" in query:
-        intent = "date"
+    elif any(kw in query for kw in ["how long", "when did", "since when", "longest on the bench", 'date', 'start', 'end']):
+        intent = 'date'
     elif "on the bench" in query or "not on the bench" in query:
         intent = "bench_status"
 
@@ -382,10 +373,161 @@ def preprocess_query(query: str) -> Dict[str, str]:
     if match:
         certificate_name = match.group(0)
 
-    return_str = json.dumps({
+    return_str = {
         "cleaned_query": query,
         "intent": intent,
         "certificate_name": certificate_name or "",
-    })
+    }
 
     return return_str
+
+def build_context(doc_batch: List[Document]) -> str:
+    structured = []
+    for doc in doc_batch:
+        structured.append({
+            "task": doc.page_content.split("\n")[0].replace("### Task: ", "").strip(),
+            "person": doc.metadata.get("person", "Unknown"),
+            "bench_status": doc.metadata.get("bench_status", "Unknown"),
+            "priority": doc.metadata.get("priority", "Unknown"),
+            "percent_complete": doc.metadata.get("percent_complete", "Unknown"),
+            "start": doc.metadata.get("start", "Unknown"),
+            "due": doc.metadata.get("due", "Unknown"),
+            "labels": doc.metadata.get("labels", []),
+            "summary": doc.page_content.strip(),
+            "checklist": doc.metadata.get("checklist", []),
+            "description": doc.metadata.get("description", ""),
+
+        })
+    return json.dumps(structured, indent=2)
+
+def handle_date_query(docs: List[Document]) -> str:
+    if not docs:
+        return "No documents provided."
+
+    date_info = []
+
+    for doc in docs:
+        title = doc.page_content.split("\n")[0].replace("### Task: ", "").strip()
+        person = doc.metadata.get("person", "Unknown")
+        bench_status = doc.metadata.get("bench_status", "Unknown")
+        start = doc.metadata.get("start", "Unknown")
+        due = doc.metadata.get("due", "Unknown")
+        percent_complete = doc.metadata.get("percent_complete", "Unknown")
+        summary = doc.page_content.strip()
+
+        def format_date(date_str):
+            try:
+                return datetime.fromisoformat(date_str).strftime("%Y-%m-%d")
+            except Exception:
+                return date_str or "N/A"
+
+        start_fmt = format_date(start)
+        due_fmt = format_date(due)
+
+        date_info.append({
+            "title": title,
+            "person": person,
+            "bench_status": bench_status,
+            "percent_complete": percent_complete,
+            "start": start_fmt,
+            "due": due_fmt,
+            "summary": summary,
+            "checklist": doc.metadata.get("checklist", []),
+            "description": doc.metadata.get("description", ""),
+
+        })
+
+    def sort_key(item):
+        try:
+            return datetime.strptime(item["due"], "%Y-%m-%d")
+        except Exception:
+            return datetime.max
+
+    date_info.sort(key=sort_key)
+
+    summary_lines = ["### 📅 Task Timeline Summary\n"]
+    for item in date_info:
+        summary_lines.append(
+            f"- **{item['title']}** (Assigned to: {item['person']})\n"
+            f"  - Start: `{item['start']}` | Due: `{item['due']}`"
+        )
+
+    return "\n".join(summary_lines)
+
+def build_document(task: Task) -> Document:
+    bucket_name = task.bucketName
+    on_bench = not (bucket_name.startswith("[") and bucket_name.endswith("]"))
+    bench_status = "On the bench" if on_bench else "Not on the bench"
+
+    description = task.details.description if task.details and task.details.description else "No description."
+    checklist_items = "\n".join(
+        f"- {item.title}" for item in task.details.checklist.values()
+    ) if task.details and task.details.checklist else "No checklist items."
+
+    labels = ", ".join(Category[key].value for key in task.appliedCategories.keys()) if task.appliedCategories else "No labels"
+
+    summary = (
+        f"### Task: {task.title}\n"
+        f"- person: {bucket_name}\n"
+        f"- bench_status: {bench_status}\n"
+        f"- Start: {task.startDateTime or 'N/A'} | Due: {task.dueDateTime or 'N/A'}\n"
+        f"- Priority: {task.priority} | Completed: {task.percentComplete}%\n"
+        f"- Labels: {labels}\n"
+        f"- Description: {description}\n"
+        f"- Checklist:\n{checklist_items}\n"
+    )
+
+    return Document(
+        page_content=summary,
+        metadata={
+            "person": bucket_name,
+            "bench_status": bench_status,
+            "priority": task.priority,
+            "percent_complete": task.percentComplete,
+            "start": task.startDateTime,
+            "due": task.dueDateTime,
+            "has_description": bool(description.strip()),
+            "has_checklist": bool(task.details and task.details.checklist),
+            "labels": str(labels.split(", ")) if labels != "No labels" else ''
+        }
+    )
+
+def summarize_batches(docs, query_str, intent, batch_size=10):
+    summaries = []
+    for i in range(0, len(docs), batch_size):
+        batch = docs[i:i + batch_size]
+        context = handle_date_query(batch) if intent == 'date' else build_context(batch)
+
+        result = app.invoke(
+            {"messages": query_str, "context": context},
+            config={"configurable": {"thread_id": str(uuid.uuid4())}}
+        )
+        summaries.append(result["messages"][-1].content if result else "No summary")
+    return summaries
+
+
+def synthesize_summary(batch_summaries, query_str):
+    final_context = "\n\n".join(batch_summaries)
+    final_prompt = f"""
+        You are an intelligent assistant tasked with synthesizing multiple batches of Kanban board data.
+
+        The original user query was: '{query_str}'
+
+        ---
+
+        ## 🎯 Objective
+
+        Generate a clear, concise, and non-redundant summary that directly answers the query. 
+
+        Group insights logically (e.g., by person, priority, or label) and use markdown formatting with bullet points or tables for clarity.
+        Dont give redundant information, summarize accordingly **without repeating yourself**.
+        
+        """
+
+
+    result = app.invoke(
+        {"messages": final_prompt, "context": final_context},
+        config={"configurable": {"thread_id": 'final_summary'}}
+    )
+    return result["messages"][-1].content if result else "No results found."
+
