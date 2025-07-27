@@ -15,37 +15,51 @@ document.addEventListener("DOMContentLoaded", () => {
         appendMessage("user", query);
         input.value = "";
 
-        // Show loading message
+        // Show loading message placeholder
         const loadingMsg = appendMessage("assistant", "Thinking...");
-        
+
         try {
             const response = await fetch(`/api/kanban_query?query=${encodeURIComponent(query)}`);
             const msg = await response.json();
-            console.log("msg.filename:", msg);
+            console.log("msg:", msg);
 
-            if (msg && typeof msg === "object" && msg['filename'] != null) {
+            // Determine the response content
+            let content = "";
 
-                const imageUrl = `/api/plot?filename=${encodeURIComponent(msg['filename'])}`;
-                loadingMsg.innerHTML = `
-                    <strong>Assistant:</strong><br>
-                    <img src="${imageUrl}" alt="Generated Plot" style="max-width: 100%; height: auto;" /><br>
-                    <p>${msg['html'] || ""}</p>
-                `;
+            if (msg && typeof msg === "object" && msg.html !== undefined) {
+                content = msg.html;
+            } else if (typeof msg === "string") {
+                content = msg;
             } else {
-                // Just a text response
-                loadingMsg.innerHTML = `<strong>Assistant:</strong> ${typeof msg === "string" ? msg : msg['html']}`;
+                content = "<em>Empty or invalid response</em>";
             }
+
+            // Replace the placeholder with full HTML content
+            loadingMsg.innerHTML = `
+                <strong>Assistant:</strong><br>
+                <div class="assistant-response">${content}</div>
+            `;
+
         } catch (error) {
             console.error("Error rendering message:", error);
             loadingMsg.innerHTML = `<strong>System:</strong> Error retrieving data.`;
         }
-
     });
 
     function appendMessage(sender, message) {
         const messageDiv = document.createElement("div");
         messageDiv.classList.add("chat-bubble", sender);
-        messageDiv.innerHTML = `<strong>${formatSender(sender)}:</strong> ${message}`;
+
+        // If assistant, render block container
+        if (sender === "assistant") {
+            messageDiv.innerHTML = `
+                <strong>${formatSender(sender)}:</strong><br>
+                <div class="assistant-response">${message}</div>
+            `;
+        } else {
+            messageDiv.innerHTML = `<strong>${formatSender(sender)}:</strong> ${message}`;
+        }
+
         chatWindow.appendChild(messageDiv);
         chatWindow.scrollTop = chatWindow.scrollHeight;
         return messageDiv;
@@ -57,4 +71,3 @@ document.addEventListener("DOMContentLoaded", () => {
         return "System";
     }
 });
-

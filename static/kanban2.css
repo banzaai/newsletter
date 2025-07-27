@@ -92,3 +92,24 @@ header {
   transition: background-color 0.3s ease;
   margin-bottom: 20px;
 }
+.assistant-response {
+    font-family: sans-serif;
+    line-height: 1.5;
+    margin-top: 0.5em;
+    white-space: normal;
+}
+
+.assistant-response h3 {
+    margin-top: 1em;
+    font-size: 1.1em;
+}
+
+.assistant-response ul,
+.assistant-response ol {
+    padding-left: 1.5em;
+    margin-bottom: 0.8em;
+}
+
+.assistant-response li {
+    margin-bottom: 0.4em;
+}

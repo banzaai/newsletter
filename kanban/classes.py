@@ -453,7 +453,6 @@ def handle_date_query(docs: List[Document]) -> str:
         )
 
     return "\n".join(summary_lines)
-
 def build_document(task: Task) -> Document:
     bucket_name = task.bucketName
     on_bench = not (bucket_name.startswith("[") and bucket_name.endswith("]"))
@@ -464,31 +463,46 @@ def build_document(task: Task) -> Document:
         f"- {item.title}" for item in task.details.checklist.values()
     ) if task.details and task.details.checklist else "No checklist items."
 
-    labels = ", ".join(Category[key].value for key in task.appliedCategories.keys()) if task.appliedCategories else "No labels"
+    labels_list = (
+        [Category[key].value for key in task.appliedCategories.keys()]
+        if task.appliedCategories else []
+    )
+    labels_str = ", ".join(labels_list)
 
+    # 🔍 Detect certificate-related tasks
+    cert_keywords = ["cert", "certificate", "training", "exam", "diploma"]
+    combined_text = f"{task.title} {description}".lower()
+    has_certificate = any(kw in combined_text for kw in cert_keywords)
+
+    # ✅ Rich and semantic `page_content`
     summary = (
         f"### Task: {task.title}\n"
-        f"- person: {bucket_name}\n"
-        f"- bench_status: {bench_status}\n"
-        f"- Start: {task.startDateTime or 'N/A'} | Due: {task.dueDateTime or 'N/A'}\n"
-        f"- Priority: {task.priority} | Completed: {task.percentComplete}%\n"
-        f"- Labels: {labels}\n"
-        f"- Description: {description}\n"
-        f"- Checklist:\n{checklist_items}\n"
+        f"**Assignee**: {bucket_name}\n"
+        f"**Bench status**: {bench_status}\n"
+        f"**Start date**: {task.startDateTime or 'N/A'}\n"
+        f"**Due date**: {task.dueDateTime or 'N/A'}\n"
+        f"**Priority**: {task.priority} | **Completed**: {task.percentComplete}%\n"
+        f"**Labels**: {labels_str or 'None'}\n"
+        f"**Certificate-related**: {'Yes' if has_certificate else 'No'}\n"
+        f"\n**Description**:\n{description}\n"
+        f"\n**Checklist**:\n{checklist_items}"
     )
 
     return Document(
         page_content=summary,
         metadata={
+            "task_id": task.id,
+            "title": task.title,
             "person": bucket_name,
             "bench_status": bench_status,
             "priority": task.priority,
             "percent_complete": task.percentComplete,
-            "start": task.startDateTime,
-            "due": task.dueDateTime,
+            "start": task.startDateTime or "N/A",
+            "due": task.dueDateTime or "N/A",
             "has_description": bool(description.strip()),
             "has_checklist": bool(task.details and task.details.checklist),
-            "labels": str(labels.split(", ")) if labels != "No labels" else ''
+            "labels": labels_str,
+            "has_certificate": has_certificate
         }
     )
 

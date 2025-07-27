@@ -11,6 +11,8 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse
 
 
+
+
 # FastAPI app
 app = FastAPI()
 
@@ -44,7 +46,6 @@ async def kanban(request: Request):
 @app.get("/query_kanban", response_class=HTMLResponse)
 async def query_kanban(request: Request):
     return templates.TemplateResponse("query_kanban.html", {"request": request})
-
 
 
 # if __name__ == "__main__":
