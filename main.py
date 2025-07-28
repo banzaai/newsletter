@@ -11,8 +11,6 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse
 
 
-
-
 # FastAPI app
 app = FastAPI()
 
