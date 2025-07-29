@@ -6,9 +6,7 @@ from collections import defaultdict, Counter
 from config import model, embeddings
 from langchain_chroma import Chroma
 from langchain.chains import RetrievalQA
-import ast  # Add this at the top if not already imported
 from dateutil.parser import parse
-from langchain.docstore.document import Document
 from datetime import datetime
 from dateutil.parser import parse
 
@@ -18,89 +16,135 @@ llm = model
 retriever = vectordb.as_retriever(search_kwargs={"k": 700})  # increase k for broader fetch
 qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
 
-
 @tool
 def filter_tasks_by_label(label: str) -> str:
-    """Returns a markdown list of tasks that match the given label. If none found, lets the agent try other tools."""
+    """
+    Returns Task from the person and its full description that match the given label.
+    """
+
+    # Retrieve documents
     docs = retriever.get_relevant_documents("")
-    matching = [
+    bench_people = [
         doc for doc in docs
-        if label.lower() in (doc.metadata.get("labels").lower() or "")
+        if doc.metadata.get("bench_status") == 'On the bench'
+        and doc.metadata.get("percent_complete", 100) < 100
+    ]
+    
+    # Filter tasks by label
+    matching = [
+        doc for doc in bench_people
+        if label.lower() in (doc.metadata.get("labels", "").lower() + doc.metadata.get("title", "").lower())
     ]
 
     if not matching:
         return f"No tasks found with label '**{label}**'. You might want to check for overdue, high-priority, or general tasks."
 
-    lines = [f"### Tasks with Label '**{label}**':\n"]
+    # Format task list
+    lines = [f"### 🏷️ Tasks with Label '**{label}**':\n"]
     for doc in matching:
         title = doc.page_content.split("\n")[0].strip()
-        bench_status = doc.metadata.get("bench_status")
         person = doc.metadata.get("person", "N/A")
         percent = doc.metadata.get("percent_complete", 0)
-        due = doc.metadata.get("due", "N/A")
+        due = doc.metadata.get("due", 'not specified')
+        lines.append(
+            f"- **{title}** (Assigned to: {person}, {percent}% complete) -> Due: {due}\n"
+        )
 
-        priority = doc.metadata.get("priority")
-        pc =doc.metadata.get("percent_complete")
-        start = doc.metadata.get("start")
-        due = doc.metadata.get("due")
-        has_des = doc.metadata.get("has_description")
-        has_check = doc.metadata.get("has_checklist")
-        labels = doc.metadata.get("labels")
-        has_cer =doc.metadata.get("has_certificate")
-        checklist = doc.metadata.get("checklist")
-        lines.append(f"- **{title}** (Person: {person} is {bench_status}, {percent}% complete, Due: {due}) --- start {start} and ends {due}, it has the labels {labels} and is {pc} completed. the checklist for this task is {checklist}")
-
-    return "\n".join(lines)
-
+    return lines
 
 @tool
-def get_opportunities(docs: List[Document], person_name: str) -> str:
-    """Returns a markdown list of opportunities a person has or had, based on document descriptions."""
-    if not docs:
-        docs = retriever.get_relevant_documents("")
-    person_name = person_name.strip().lower()
+def get_opportunities() -> str:
+    """Returns a markdown list of opportunities or work proposals for a specific person from a query or if not specified for every one \
+        if asked for opportunities that are completed you have to check the completion percentage : Complete 100%. Can be chained with other tools."""
+    docs = retriever.get_relevant_documents("opportunity")
+    now = datetime.now(timezone.utc)
 
     opportunities = []
 
     for doc in docs:
+        if doc.metadata.get("bench_status") != "On the bench":
+            continue
         m = doc.metadata
         doc_person = m.get("person", "").lower()
+        title = m.get("title", "Untitled")
         description = m.get("description", "")
+        due_str = m.get("due", "")
 
-        if person_name not in doc_person:
-            continue
 
         # Look for keywords that suggest an opportunity
-        if any(keyword in description.lower() for keyword in ["opportunity", "opportunities" "assigned to", "joined", "started", "engaged in"]):
-            title = m.get("title", "Untitled")
-            opportunities.append(f"- **{title}**: {description}")
+        combined_text = f"{description} {title}".lower()
+        if any(keyword in combined_text for keyword in [
+            "opp", "opportunity", "interviews", "interview", 
+            "opportunities", "joined", "engaged in"
+        ]):
+            due_date_str = ""
+            status = ""
+            pc = doc.metadata.get("percent_complete")
+            if due_str:
+                try:
+                    due = parse(due_str)
+                    due_date_str = str(due.date())
+                    status = "⏳ Not yet obtained" if due > now else "✅ Completed"
+                except Exception:
+                    due_date_str = "Invalid date"
+                    status = "⚠️ Invalid due date"
+            else:
+                due_date_str = "Not set"
+                status = "❓ Due date missing"
+
+            opportunities.append(
+                f"- **Opportunities for: {doc_person} = {title}**:(Due: {due_date_str}, Status: {status})  and is {pc} completed"
+            )
 
     if not opportunities:
-        return f"No opportunities found for **{person_name}**."
+        return f"No opportunities found for **{doc_person}**."
 
-    return f"### Opportunities for **{person_name.title()}**:\n" + "\n".join(opportunities)
+    return opportunities
 
+def contains_rfp_request_for_proposal():
+    """
+    Checks if 'RFP'or 'Request for Proposal' is present in the title, description, or checklist of a given item.
+    """
+    docs = retriever.get_relevant_documents("")
+    rfp_keywords = ["rfp", "request for proposal", "rfps"]
+    for doc in docs:
+        title = doc.metadata.get("title", "").lower()
+        description = doc.item.get("description", "").lower()
+        checklist = doc.item.get("checklist", [])
+
+        # Check title and description
+        if any(keyword in title for keyword in rfp_keywords):
+            return True
+        if any(keyword in description for keyword in rfp_keywords):
+            return True
+
+        # Check checklist items
+        for entry in checklist:
+            if any(keyword in entry.lower() for keyword in rfp_keywords):
+                return True
+
+    return False
 
 
 @tool
-def who_on_bench(docs: str) -> str:
-    """Returns a markdown list of people currently on the bench."""
-    print('IN HEREEEEEEE')
-    docs = retriever.get_relevant_documents(str)
-    people = sorted({doc.metadata.get("person") for doc in docs if doc.metadata.get("bench_status") == "On the bench"})
-    if not people:
+def who_on_bench() -> str:
+    """Returns a markdown list of people who are currently on the bench. 
+    Use this to find available individuals. """
+
+    docs = retriever.get_relevant_documents("who is on the bench")
+    
+    bench_people = [doc.metadata.get("person") for doc in docs if doc.metadata.get("bench_status") == "On the bench"]
+    
+    if not bench_people:
         return "No one is currently on the bench."
-    lines = ["### People Currently On The Bench:\n"]
-    for p in people:
-        lines.append(f"- **{p}**")
-    return "\n".join(lines)
+    
+    return "\n".join(f"- {person}" for person in bench_people)
 
 
 @tool
-def uncompleted_tasks_for_person(person_name: str, docs: List[Document]) -> str:
-    """Returns uncompleted tasks (<100%) for a person as a markdown table."""
-    if not docs:
-        docs = retriever.get_relevant_documents("")
+def uncompleted_tasks_for_person(person_name: str) -> str:
+    """Returns uncompleted tasks  and its description (<100%) for a person as a markdown table."""
+    docs = retriever.get_relevant_documents("")
     tasks = [
         doc for doc in docs
         if person_name.lower() in (doc.metadata.get("person") or "").lower()
@@ -112,7 +156,7 @@ def uncompleted_tasks_for_person(person_name: str, docs: List[Document]) -> str:
 
     lines = [
         f"### Uncompleted Tasks for **{person_name}**\n",
-        "| Task | Percent Complete | Due Date | Priority |",
+        "| Task | Percent Complete | Due Date | Priority | Description |",
         "|-------|-----------------|----------|----------|"
     ]
     for doc in tasks:
@@ -120,16 +164,16 @@ def uncompleted_tasks_for_person(person_name: str, docs: List[Document]) -> str:
         percent = doc.metadata.get("percent_complete", 0)
         due = doc.metadata.get("due", "N/A")
         priority = doc.metadata.get("priority", "N/A")
-        lines.append(f"| {content} | {percent}% | {due} | {priority} |")
+        description = doc.metadata.get("description")
+        lines.append(f"| {content} | {percent}% | {due} | {priority} | {description} |")
 
     return "\n".join(lines)
 
 
 @tool
-def completed_tasks_for_person(person_name: str, docs: List[Document]) -> str:
-    """Returns completed tasks (100%) for a person as a markdown table."""
-    if not docs:
-        docs = retriever.get_relevant_documents("")
+def completed_tasks_for_person(person_name: str) -> str:
+    """Returns completed tasks (100%) with description for a person as a markdown table."""
+    docs = retriever.get_relevant_documents("")
     tasks = [
         doc for doc in docs
         if person_name.lower() in (doc.metadata.get("person") or "").lower()
@@ -141,24 +185,41 @@ def completed_tasks_for_person(person_name: str, docs: List[Document]) -> str:
 
     lines = [
         f"### Completed Tasks for **{person_name}**\n",
-        "| Task | Due Date | Priority |",
-        "|-------|----------|----------|"
+        "| Task     |     Due Date | Priority | Description      |",
+        "|---------------|------------------|------|---------------|"
     ]
     for doc in tasks:
         content = doc.page_content.split("\n")[0].strip()
-        due = doc.metadata.get("due", "N/A")
-        priority = doc.metadata.get("priority", "N/A")
-        lines.append(f"| {content} | {due} | {priority} |")
+        due_date = doc.metadata.get("due")
 
-    return "\n".join(lines)
+        if due_date:
+            # If it's a string, try to parse it
+            if isinstance(due_date, str):
+                try:
+                    due_date = datetime.fromisoformat(due_date)
+                except ValueError:
+                    due = due_date  # Keep original if parsing fails
+                else:
+                    due = due_date.date().isoformat()
+            elif isinstance(due_date, datetime):
+                due = due_date.date().isoformat()
+            else:
+                due = str(due_date)  # Fallback for unexpected types
+        else:
+            due = "N/A"
+
+        priority = doc.metadata.get("priority", "N/A")
+        description = doc.metadata.get("description")
+        lines.append(f"| {content} | {due} | {priority} | {description} |")
+
+    return lines
 
 
 @tool
-def overdue_tasks_for_person(person_name: str, docs: List[Document]) -> str:
+def overdue_tasks_for_person(person_name: str) -> str:
     """Returns overdue, uncompleted tasks for a person in markdown list."""
     now_iso = datetime.now().isoformat()
-    if not docs:
-        docs = retriever.get_relevant_documents("")
+    docs = retriever.get_relevant_documents("")
     overdue = [
         doc for doc in docs
         if person_name.lower() in (doc.metadata.get("person") or "").lower()
@@ -179,10 +240,9 @@ def overdue_tasks_for_person(person_name: str, docs: List[Document]) -> str:
 
 
 @tool
-def high_priority_uncompleted_tasks(docs: List[Document]) -> str:
+def high_priority_uncompleted_tasks() -> str:
     """Returns all high priority tasks that are not completed, as markdown table."""
-    if not docs:
-        docs = retriever.get_relevant_documents("")
+    docs = retriever.get_relevant_documents("")
     tasks = [
         doc for doc in docs
         if doc.metadata.get("priority") in ["High", 5, "5"] and doc.metadata.get("percent_complete", 100) < 100
@@ -205,13 +265,11 @@ def high_priority_uncompleted_tasks(docs: List[Document]) -> str:
     return "\n".join(lines)
 
 @tool
-def kanban_stats_summary(docs: List[Document]) -> str:
+def kanban_stats_summary() -> str:
     """
-    Returns statistics on people, bench duration, uncompleted tasks, certifications,
-    and additional breakdowns by categories.
+    Returns statistics on people or if specified a specific person, bench duration, uncompleted tasks, certifications and additional breakdowns by categories, **can be chained with other tools**.
     """
-    if not docs:
-        docs = retriever.get_relevant_documents("")
+    docs = retriever.get_relevant_documents("")
     now = datetime.now()
     
     bench_people = set()
@@ -257,13 +315,12 @@ def kanban_stats_summary(docs: List[Document]) -> str:
             priority_counts[priority]["uncompleted"] += 1
 
 
-        # Inside your loop:
-        raw_labels = m.get("labels", [])
-        if isinstance(raw_labels, str):
-            try:
-                raw_labels = ast.literal_eval(raw_labels)
-            except:
-                raw_labels = []
+        # Inside loop:
+        raw_labels = m.get("labels")
+        if isinstance(raw_labels, str) and len(raw_labels)>0:
+            print('In here')
+            raw_labels = raw_labels.split(',')
+            print(raw_labels)
 
         for label in raw_labels:
             label_counts[label.lower()] += 1
@@ -319,14 +376,11 @@ def kanban_stats_summary(docs: List[Document]) -> str:
 
 
 @tool
-def tasks_with_checklist(docs: List[Document], include_completed: bool = False) -> str:
-    """Returns tasks with checklist items as a markdown list, optionally including completed."""
-    if not docs:
-        docs = retriever.get_relevant_documents("")
-    if include_completed:
-        filtered = [doc for doc in docs if doc.metadata.get("has_checklist")]
-    else:
-        filtered = [doc for doc in docs if doc.metadata.get("has_checklist") and doc.metadata.get("percent_complete", 100) < 100]
+def tasks_with_checklist() -> str:
+    """Returns tasks with checklist items as a markdown list, optionally including completed, can be chained with other tools"""
+    docs = retriever.get_relevant_documents("")
+
+    filtered = [doc for doc in docs if doc.metadata.get("has_checklist")]
 
     if not filtered:
         return "No matching tasks with checklist."
@@ -337,16 +391,18 @@ def tasks_with_checklist(docs: List[Document], include_completed: bool = False) 
         person = doc.metadata.get("person", "N/A")
         percent = doc.metadata.get("percent_complete", 0)
         due = doc.metadata.get("due", "N/A")
-        lines.append(f"- **{title}** (Person: {person}, {percent}% complete, Due: {due})")
+        checklist = doc.metadata.get("checklist")
+        description = doc.metadata.get("description")
+        lines.append(f"- **{title}** (Person: {person}, {percent}% complete, Due: {due})\
+                     with checlist: {checklist} and  with the description of the task: {description}")
 
     return "\n".join(lines)
 
 
 @tool
-def tasks_started_after(date_iso: str, docs: List[Document]) -> str:
+def tasks_started_after(date_iso: str) -> str:
     """Returns tasks started after the specified ISO date string as a markdown list."""
-    if not docs:
-        docs = retriever.get_relevant_documents("")
+    docs = retriever.get_relevant_documents("")
     filtered = [
         doc for doc in docs
         if doc.metadata.get("start") and doc.metadata["start"] >= date_iso
@@ -366,10 +422,9 @@ def tasks_started_after(date_iso: str, docs: List[Document]) -> str:
 
 
 @tool
-def last_completed_task_for_person(person_name: str, docs: List[Document]) -> str:
-    """Returns the most recent completed task (100%) for a given person."""
-    if not docs:
-        docs = retriever.get_relevant_documents("")
+def last_completed_task_for_person(person_name: str) -> str:
+    """Returns the most recent completed task (100%) for a given person and its description """
+    docs = retriever.get_relevant_documents("")
     completed = [
         doc for doc in docs
         if person_name.lower() in (doc.metadata.get("person") or "").lower() and doc.metadata.get("percent_complete", 0) == 100 and doc.metadata.get("due")
@@ -383,15 +438,15 @@ def last_completed_task_for_person(person_name: str, docs: List[Document]) -> st
     doc = completed[0]
     title = doc.page_content.split("\n")[0].strip()
     due = doc.metadata.get("due", "N/A")
-    return f"**{person_name}**'s last completed task was:\n- **{title}** (Due: {due})"
+    description = doc.metadata.get("description")
+    return f"**{person_name}**'s last completed task was:\n- **{title}** (Due: {due} with description: {description})"
 
 
 @tool
 def certificates_completed_since(days_ago: int = 30) -> str:
     """
-    Returns a grouped list of people who completed certificate-related tasks in the past X days.
+    Returns people or the person from the query who completed certificate-related tasks in the past X days with the available info about that certificate.
     """
-
     tasks_by_person = defaultdict(list)
 
     try:
@@ -406,11 +461,7 @@ def certificates_completed_since(days_ago: int = 30) -> str:
             if not due_str:
                 continue
             try:
-                keywords = ['certificate', 'certification', 'certificates', 'certifications']
-                checklist_items = [item.lower() for item in metadata.get("checklist", [])]
-
-                if any(keyword in checklist_items for keyword in keywords):
-                    checklist = metadata.get("checklist") 
+                checklist = metadata.get("checklist") 
                 due_date = parse(due_str)
                 person = metadata.get("person", "Unknown")
                 title = metadata.get("title", "Untitled Task")
@@ -424,27 +475,25 @@ def certificates_completed_since(days_ago: int = 30) -> str:
         return f"No certificate-related tasks completed in the past {days_ago} days."
 
     # Format with collapsible sections
-    lines = [f"<h3>Certificate-Related Tasks Completed in the Past {days_ago} Days</h3>"]
+    lines = [f"Certificate-Related Tasks Completed in the Past {days_ago} Days"]
     for person, tasks in sorted(tasks_by_person.items()):
-        lines.append(f"<details><summary><strong>{person}</strong></summary><ul>")
+        lines.append(f"{person}")
         for title, due in tasks:
-            lines.append(f"<li>🏁 <strong>{title}</strong> (Due: {due})</li>")
+            lines.append(f"{title} (Due: {due})")
             if checklist:
-                lines.append(f"<li> <strong>{checklist}</strong> )</li>")
-        lines.append("</ul></details>\n")
+                lines.append(f"{checklist}")
 
-    return "\n".join(lines)
+    return lines
 
 
 
 @tool
-def bench_duration_for_person(person_name: str, docs: List[Document]) -> str:
+def bench_duration_for_person(person_name: str) -> str:
     """
     Calculates how long a person has been on the bench, using the earliest task's start date.
     """
     person_name_lc = person_name.lower().strip()
-    if not docs:
-        docs = retriever.get_relevant_documents("")
+    docs = retriever.get_relevant_documents("")
 
     valid_dates = []
     for doc in docs:
@@ -477,66 +526,15 @@ def bench_duration_for_person(person_name: str, docs: List[Document]) -> str:
     delta_days = (now_utc - earliest).days
     return f"**{person_name}** has been on the bench for **{delta_days} days**, since **{earliest.date().isoformat()}**."
 
-@tool
-def certificates_for_person_since(person_name: str, docs: List[Document]) -> str:
-    """Returns certificate-related tasks completed or not by a person, including due date status."""
-    if not docs: 
-        docs = retriever.get_relevant_documents(person_name)
-    person_name = person_name.strip().lower()
-
-    certs = []
-    now = datetime.now(timezone.utc)  
-
-    for doc in docs:
-        m = doc.metadata
-        doc_person = m.get("person", "").lower()
-
-        if person_name not in doc_person:
-            continue
-
-        if not m.get("has_certificate"):
-            continue
-
-        title = m.get("title", "Untitled Task")
-        person = m.get("person", "Unknown")
-        due_str = m.get("due")
-
-        if due_str:
-            try:
-                due = parse(due_str)
-                due_date_str = due.date()
-                if due > now:
-                    status = "⏳ Not yet obtained"
-                else:
-                    status = "✅ Completed"
-            except Exception:
-                due_date_str = "Invalid date"
-                status = "⚠️ Invalid due date"
-        else:
-            due_date_str = "Not set"
-            status = "❓ Due date missing"
-
-        certs.append((title, due_date_str, person, status))
-
-    if not certs:
-        return f"No certificate-related tasks found for '{person_name}'."
-
-    full_name = certs[0][2]
-    lines = [f"### Certificates for **{full_name}**:\n"]
-    for title, due, _, status in certs:
-        lines.append(f"- 🏁 **{title}** (Due: {due}) — {status}")
-
-    return "\n".join(lines)
 
 @tool
-def who_completed_certificate(docs: List[Document], keyword: str, completed_only: bool = True) -> str:
+def who_completed_certificate(keyword: str, completed_only: bool = True) -> str:
     """
     Returns a list of people who obtained a certification/training matching the keyword.
-    Includes extra metadata for context. Optionally filters by completed tasks only.
+    Includes extra metadata for context. Optionally filters by completed tasks only, can be chained with other tools.
     """
 
-    if not docs:
-        docs = retriever.get_relevant_documents("")
+    docs = retriever.get_relevant_documents("")
     matches = []
 
     keyword_lc = keyword.lower()
@@ -587,10 +585,11 @@ def who_completed_certificate(docs: List[Document], keyword: str, completed_only
 
 
 @tool
-def general_qa(question: str, docs: List[Document] = None) -> str:
+def general_qa(question: str) -> str:
     """
     Use this for any free-text Kanban question or when no other tool applies.
     Answers based on semantic search + LLM. Includes fallback guidance if no good match is found.
+    Also summarizes retrieved content and contrasts it with the original question.
     """
     if not question.strip():
         return (
@@ -601,22 +600,28 @@ def general_qa(question: str, docs: List[Document] = None) -> str:
         )
 
     try:
-        # Fallback to semantic search if no docs provided
+        # Retrieve relevant documents
+        docs = retriever.get_relevant_documents(question)
+
         if not docs:
-            docs = retriever.get_relevant_documents(question)
-
-        # Run the LLM-based QA chain
-        answer = qa_chain.run(input_documents=docs, query=question)
-
-        if not answer or answer.strip().lower() in [
-            "i don't know", "not sure", "no relevant information found"
-        ]:
             return (
-                "🤔 I couldn't find a confident answer. Try rephrasing your question "
+                "🤔 I couldn't find any relevant documents. Try rephrasing your question "
                 "or be more specific (e.g., include a person's name or keyword)."
             )
 
-        return answer.strip()
+        # Step 1: Summarize the retrieved documents
+        summary_prompt = f"Summarize the following Kanban-related documents:\n\n{docs}"
+        summary = llm.invoke(summary_prompt)
+
+        # Step 2: Contrast the summary with the original question
+        contrast_prompt = (
+            f"Given the user's question:\n\n\"{question}\"\n\n"
+            f"And the summary of relevant documents:\n\n\"{summary}\"\n\n"
+            "Provide a direct answer to the question, and explain briefly how the summary supports it."
+        )
+        final_answer = llm.invoke(contrast_prompt)
+
+        return final_answer.strip()
 
     except Exception as e:
         return f"❌ An error occurred while processing your question: `{e}`"
