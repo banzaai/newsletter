@@ -4,6 +4,40 @@ body {
   margin: 0;
   padding: 0;
 }
+.main-layout {
+  display: flex;
+  flex-direction: row;
+  gap: 30px;
+  padding: 20px;
+  align-items: flex-start;
+}
+
+.chat-container {
+  flex: 2;
+}
+
+.tag-info {
+  flex: 1;
+  background-color: #f4f4f4;
+  border-left: 2px solid #ccc;
+  padding: 20px;
+  font-size: 0.95em;
+  max-width: 300px;
+}
+
+.tag-info h2 {
+  margin-top: 0;
+  color: #333;
+}
+
+.tag-info ul {
+  list-style-type: disc;
+  padding-left: 20px;
+}
+
+.tag-info li {
+  margin-bottom: 5px;
+}
 
 .chat-container {
   max-width: 800px;

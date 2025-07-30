@@ -7,24 +7,28 @@
   <script src="/static/chat_kanban.js" defer></script>
 </head>
 <body>
-  <div class="chat-container">
-    <header>
+  <div class="main-layout">
+    <div class="chat-container">
+     <header>
       <h1>Kanban Query Assistant</h1>
       <p>Ask about current benchers, tasks, and more.</p>
+      <small>
+        💡 Tip: For better results, try including tags like <em>Java</em>, <em>Training</em>, <em>Potential Mission</em>, <em>Presales</em>, <em>OOO</em>, <em>Certification</em>, etc. in your query.
+      </small>
       <a href="/" class="start-button">Back to Home</a>
     </header>
+
       <hr class="section-divider" />
 
+      <div id="chatWindow" class="chat-window">
+        <!-- Messages will be appended here -->
+      </div>
 
-    <div id="chatWindow" class="chat-window">
-      <!-- Messages will be appended here -->
+      <form id="searchForm" class="chat-form">
+        <input type="text" id="queryInput" name="query" placeholder="E.j.: Who is currently on the bench.">
+        <button type="submit">Send</button>
+      </form>
     </div>
-
-    <form id="searchForm" class="chat-form">
-      <input type="text" id="queryInput" name="query" placeholder="E.j.: Who is currently on the bench.">
-      <button type="submit">Send</button>
-    </form>
   </div>
 </body>
 </html>
-

@@ -16,7 +16,6 @@ llm = model
 
 retriever = vectordb.as_retriever(search_kwargs={"k": 700})  # increase k for broader fetch
 qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
-print(f"Using Supabase client: {type(connection.supabase)}")
 
 @tool
 def filter_tasks_by_label(label: str) -> str:
@@ -35,8 +34,11 @@ def filter_tasks_by_label(label: str) -> str:
     # Filter tasks by label
     matching = [
         doc for doc in bench_people
-        if label.lower() in (doc.metadata.get("labels", "").lower() + doc.metadata.get("title", "").lower())
+        if label.lower() in [
+            tag.strip().lower() for tag in doc.metadata.get("labels", "").split(",")
+        ] or label.lower() in doc.metadata.get("title", "").lower()
     ]
+
 
     if not matching:
         return f"No tasks found with label '**{label}**'. You might want to check for overdue, high-priority, or general tasks."
