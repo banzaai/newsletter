@@ -9,8 +9,9 @@ from langchain.chains import RetrievalQA
 from dateutil.parser import parse
 from datetime import datetime
 from dateutil.parser import parse
+from db import connection
 
-vectordb = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
+vectordb = connection.supabase
 llm = model
 
 retriever = vectordb.as_retriever(search_kwargs={"k": 700})  # increase k for broader fetch
