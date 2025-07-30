@@ -1,4 +1,5 @@
 import json
+import uuid
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
 from config import embeddings
@@ -10,7 +11,7 @@ from fastapi import APIRouter, Query, Body, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
 from pathlib import Path
 from .kanban_config import agent, memory
-
+from db import ENVIRONMENT, connection
 
 
 load_dotenv(override=True)
@@ -63,23 +64,30 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
     print('📥 Received request to save kanban info')
 
     try:
-        db = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
-
         docs = [build_document(task) for task in task_list.tasks]
-
 
         text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
             chunk_size=1000,
-            chunk_overlap=20
+            chunk_overlap=100
         )
         chunked_docs = text_splitter.split_documents(docs)
 
-        db.add_documents(chunked_docs)
+        if ENVIRONMENT == "local":
+            db = connection.supabase 
+            db.add_documents(chunked_docs)
+
+        elif ENVIRONMENT == "production":
+            supabase = connection.supabase
+            # Store each chunk in the Supabase 'teams' table
+            for i, doc in enumerate(chunked_docs):
+                supabase.table("teams").insert({
+                    "id": str(uuid.uuid4()),  \
+                    "context": doc.page_content
+                }).execute()
 
         output_path = Path("kanban_docs.jsonl")
         with output_path.open("w", encoding="utf-8") as f:
             for doc in chunked_docs:
-            
                 json.dump({
                     "page_content": doc.page_content,
                     "metadata": doc.metadata
@@ -98,8 +106,6 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
 async def kanban_query(query: Annotated[str, Query(description="Your question")]):
     try:
         answer = await agent.arun(query)
-        print("--- MEMORY STATE ---")
-        print(memory.load_memory_variables({}))
 
         html = markdown.markdown(
             answer,

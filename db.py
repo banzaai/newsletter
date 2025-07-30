@@ -14,15 +14,25 @@ from supabase import create_client, Client as SupabaseClient
 ENVIRONMENT = os.getenv("ENVIRONMENT")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-if ENVIRONMENT == "production":
-    # Ensure the DATABASE_URL is in the correct format for psycopg
-    supabase_url = os.getenv("VECTOR_DB_URL")
-    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    supabase = create_client(supabase_url, supabase_key)
 
-if ENVIRONMENT == "local":
-    engine = create_engine(DATABASE_URL)
+class Connect:
+    def __init__(self):
+        self.engine = None
+        self.supabase = None
+        self.get_db()
 
+    def get_db(self):
+        if ENVIRONMENT == "production":
+            # Ensure the DATABASE_URL is in the correct format for psycopg
+            supabase_url = os.getenv("VECTOR_DB_URL")
+            supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            self.supabase = create_client(supabase_url, supabase_key)
+
+        elif ENVIRONMENT == "local":
+            self.engine = create_engine(DATABASE_URL)
+            self.supabase = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
+
+connection = Connect()
 
 @tool
 def save_story(name: str, content: str):
@@ -52,6 +62,7 @@ def store_vector(story_id: int, name: str, content: str):
     '''
         Stores the vector representation of a user's story in the vector database.
         '''
+
     text_to_embed = f"Title: {name} Content: {content} Story ID: {story_id}"
     document = Document(
     page_content=text_to_embed,
@@ -67,7 +78,7 @@ def store_vector(story_id: int, name: str, content: str):
         # Generate embedding using your embedding function
         embedding = embeddings.embed_query(text_to_embed)
 
-        response = supabase.table("stories").insert({
+        response =  connection.supabase.table("stories").insert({
             "id": str(story_id),
             "embedding": embedding,
             "name": name,
@@ -118,7 +129,7 @@ def store_event_vector(event_id: int, name: str, event: str, category: str, orga
             # Generate embedding using your embedding function
             embedding = embeddings.embed_query(text_to_embed)
 
-            response = supabase.table("events").insert({
+            response = connection.supabase.table("events").insert({
                 "id": str(event_id),
                 "embedding": embedding,
                 "name": name,
