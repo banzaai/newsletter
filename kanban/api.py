@@ -73,16 +73,17 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
         chunked_docs = text_splitter.split_documents(docs)
 
         if ENVIRONMENT == "local":
-            db = connection.supabase 
+            db = connection.supabase  # Chroma
             db.add_documents(chunked_docs)
 
         elif ENVIRONMENT == "production":
             supabase = connection.supabase
-            # Store each chunk in the Supabase 'teams' table
-            for i, doc in enumerate(chunked_docs):
+            for doc in chunked_docs:
+                embedding = embeddings.embed_query(doc.page_content)
+
                 supabase.table("teams").insert({
-                    "id": str(uuid.uuid4()),  \
-                    "context": doc.page_content
+                    "id": str(uuid.uuid4()),
+                    "context": embedding  
                 }).execute()
 
         output_path = Path("kanban_docs.jsonl")
