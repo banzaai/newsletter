@@ -3,7 +3,7 @@ from urllib import parse
 from langchain.tools import tool
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict, Counter
-from config import model, embeddings
+from config import model
 from langchain_chroma import Chroma
 from langchain.chains import RetrievalQA
 from dateutil.parser import parse
@@ -16,6 +16,7 @@ llm = model
 
 retriever = vectordb.as_retriever(search_kwargs={"k": 700})  # increase k for broader fetch
 qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
+print(f"Using Supabase client: {type(connection.supabase)}")
 
 @tool
 def filter_tasks_by_label(label: str) -> str:

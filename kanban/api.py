@@ -10,7 +10,7 @@ from .classes import TaskList, build_document, get_access_token, get_buckets, ge
 from fastapi import APIRouter, Query, Body, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
 from pathlib import Path
-from .kanban_config import agent, memory
+from .kanban_config import agent
 from db import ENVIRONMENT, connection
 
 
@@ -72,20 +72,25 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
         )
         chunked_docs = text_splitter.split_documents(docs)
 
+        db = connection.supabase
+
         if ENVIRONMENT == "local":
-            db = connection.supabase  # Chroma
+            # Chroma vector store
             db.add_documents(chunked_docs)
 
         elif ENVIRONMENT == "production":
-            supabase = connection.supabase
+            # Supabase with pgvector
             for doc in chunked_docs:
                 embedding = embeddings.embed_query(doc.page_content)
 
-                supabase.table("teams").insert({
+                db.table("documents").insert({
                     "id": str(uuid.uuid4()),
-                    "context": embedding  
+                    "embedding": embedding,
+                    "content": doc.page_content,
+                    "metadata": doc.metadata
                 }).execute()
 
+        # Save to local file for inspection/debugging
         output_path = Path("kanban_docs.jsonl")
         with output_path.open("w", encoding="utf-8") as f:
             for doc in chunked_docs:

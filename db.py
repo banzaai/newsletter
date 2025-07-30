@@ -8,7 +8,7 @@ from config import embeddings
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_chroma import Chroma
 import os
-from supabase import create_client, Client as SupabaseClient
+from supabase import create_client
 from langchain.vectorstores import SupabaseVectorStore
 
 ENVIRONMENT = os.getenv("ENVIRONMENT")
@@ -30,8 +30,12 @@ class Connect:
             self.supabase = SupabaseVectorStore(
                 client=client,
                 embedding=embeddings,
-                table_name="teams" 
+                table_name="documents",
+                embedding_column="embedding",
+                text_column="content",
+                metadata_column="metadata"
             )
+
 
         elif ENVIRONMENT == "local":
             self.engine = create_engine(DATABASE_URL)
