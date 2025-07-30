@@ -58,7 +58,6 @@ def api_get_tasks(plan_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-
 @router.post("/save_kanban_info/", response_class=HTMLResponse)
 async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
     print('📥 Received request to save kanban info')
@@ -72,25 +71,12 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
         )
         chunked_docs = text_splitter.split_documents(docs)
 
-        db = connection.supabase
+        db = connection.supabase  # SupabaseVectorStore or Chroma
 
-        if ENVIRONMENT == "local":
-            # Chroma vector store
-            db.add_documents(chunked_docs)
+        # ✅ Add documents to vector store (Chroma or Supabase)
+        db.add_documents(chunked_docs)
 
-        elif ENVIRONMENT == "production":
-            # Supabase with pgvector
-            for doc in chunked_docs:
-                embedding = embeddings.embed_query(doc.page_content)
-
-                db.table("documents").insert({
-                    "id": str(uuid.uuid4()),
-                    "embedding": embedding,
-                    "content": doc.page_content,
-                    "metadata": doc.metadata
-                }).execute()
-
-        # Save to local file for inspection/debugging
+        # 📝 Save to local file for inspection/debugging
         output_path = Path("kanban_docs.jsonl")
         with output_path.open("w", encoding="utf-8") as f:
             for doc in chunked_docs:
