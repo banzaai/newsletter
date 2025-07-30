@@ -9,7 +9,7 @@ from langchain_text_splitters import CharacterTextSplitter
 from langchain_chroma import Chroma
 import os
 from supabase import create_client, Client as SupabaseClient
-
+from langchain.vectorstores import SupabaseVectorStore
 
 ENVIRONMENT = os.getenv("ENVIRONMENT")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -23,14 +23,20 @@ class Connect:
 
     def get_db(self):
         if ENVIRONMENT == "production":
-            # Ensure the DATABASE_URL is in the correct format for psycopg
             supabase_url = os.getenv("VECTOR_DB_URL")
             supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-            self.supabase = create_client(supabase_url, supabase_key)
+            client = create_client(supabase_url, supabase_key)
+
+            self.supabase = SupabaseVectorStore(
+                client=client,
+                embedding=embeddings,
+                table_name="teams" 
+            )
 
         elif ENVIRONMENT == "local":
             self.engine = create_engine(DATABASE_URL)
             self.supabase = Chroma(persist_directory="vector_kanban_db", embedding_function=embeddings)
+
 
 connection = Connect()
 
