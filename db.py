@@ -30,10 +30,7 @@ class Connect:
             self.supabase = SupabaseVectorStore(
                 client=client,
                 embedding=embeddings,
-                table_name="documents",
-                embedding_column="embedding",
-                text_column="content",
-                metadata_column="metadata"
+                table_name="documents"
             )
 
 
