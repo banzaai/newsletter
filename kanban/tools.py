@@ -1,4 +1,5 @@
-from typing import List
+import re
+from typing import List, Optional
 from urllib import parse
 from langchain.tools import tool
 from datetime import datetime, timedelta, timezone
@@ -17,117 +18,143 @@ llm = model
 retriever = vectordb.as_retriever(search_kwargs={"k": 700})  # increase k for broader fetch
 qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
 
-@tool
-def filter_tasks_by_label(label: str) -> str:
-    """
-    Returns Task from the person and its full description that match the given label.
-    """
 
-    # Retrieve documents
+@tool
+def filter_tasks_by_label(label: str, status_filter: Optional[str] = None) -> str:
+    """
+    Returns tasks matching the given label, grouped by completion status (Completed or In Progress).
+    Includes full task descriptions and metadata.
+    Filters by status if 'completed' or 'not completed' is passed. **Can be chained with other tools**
+    """
     docs = retriever.get_relevant_documents("")
-    bench_people = [
-        doc for doc in docs
-        if doc.metadata.get("bench_status") == 'On the bench'
-        and doc.metadata.get("percent_complete", 100) < 100
-    ]
-    
-    # Filter tasks by label
+    now = datetime.now(timezone.utc)
+
     matching = [
-        doc for doc in bench_people
+        doc for doc in docs
         if label.lower() in [
             tag.strip().lower() for tag in doc.metadata.get("labels", "").split(",")
         ] or label.lower() in doc.metadata.get("title", "").lower()
     ]
 
-
     if not matching:
         return f"No tasks found with label '**{label}**'. You might want to check for overdue, high-priority, or general tasks."
 
-    # Format task list
-    lines = [f"### 🏷️ Tasks with Label '**{label}**':\n"]
+    completed_tasks = []
+    in_progress_tasks = []
+
     for doc in matching:
         title = doc.page_content.split("\n")[0].strip()
         person = doc.metadata.get("person", "N/A")
         percent = doc.metadata.get("percent_complete", 0)
-        due = doc.metadata.get("due", 'not specified')
-        lines.append(
-            f"- **{title}** (Assigned to: {person}, {percent}% complete) -> Due: {due}\n"
-        )
+        due = doc.metadata.get("due", "Not specified")
 
-    return lines
+        task_line = f"- **{title}** (Assigned to: {person}, {percent}% complete) → Due: {due}"
+
+        # Apply status filter
+        if status_filter == "completed" and percent == 100:
+            completed_tasks.append(task_line)
+        elif status_filter == "not completed" and percent < 100:
+            in_progress_tasks.append(task_line)
+        elif status_filter is None:
+            # No filter: include all
+            if percent == 100:
+                completed_tasks.append(task_line)
+            else:
+                in_progress_tasks.append(task_line)
+
+    output = [f"### 🏷️ Tasks with Label '**{label}**':\n"]
+
+    if in_progress_tasks:
+        output.append("#### 🔄 In Progress:\n" + "\n".join(in_progress_tasks))
+    if completed_tasks:
+        output.append("#### ✅ Completed:\n" + "\n".join(completed_tasks))
+
+    return "\n\n".join(output)
 
 @tool
-def get_opportunities() -> str:
-    """Returns a markdown list of opportunities or work proposals for a specific person from a query or if not specified for every one \
-        if asked for opportunities that are completed you have to check the completion percentage : Complete 100%. Can be chained with other tools."""
+def get_opportunities(status_filter: Optional[str] = None) -> str:
+    """
+    Returns a markdown list of opportunities grouped by person.
+    You can filter by status: 'completed', 'not completed', or leave empty for all.
+    Opportunities are considered completed if 'percent_complete' is 100. **Can be chained with other tools.**
+    """
     docs = retriever.get_relevant_documents("opportunity")
     now = datetime.now(timezone.utc)
 
-    opportunities = []
+    grouped_opportunities = {}
 
     for doc in docs:
         if doc.metadata.get("bench_status") != "On the bench":
             continue
+
         m = doc.metadata
         doc_person = m.get("person", "").lower()
         title = m.get("title", "Untitled")
         description = m.get("description", "")
         due_str = m.get("due", "")
+        pc_val = m.get("percent_complete", 0)
 
-
-        # Look for keywords that suggest an opportunity
         combined_text = f"{description} {title}".lower()
         if any(keyword in combined_text for keyword in [
-            "opp", "opportunity", "interviews", "interview", 
+            "opp", "opportunity", "interviews", "interview", 'opps',
             "opportunities", "joined", "engaged in"
         ]):
-            due_date_str = ""
-            status = ""
-            pc = doc.metadata.get("percent_complete")
-            if due_str:
-                try:
-                    due = parse(due_str)
-                    due_date_str = str(due.date())
-                    status = "⏳ Not yet obtained" if due > now else "✅ Completed"
-                except Exception:
-                    due_date_str = "Invalid date"
-                    status = "⚠️ Invalid due date"
-            else:
-                due_date_str = "Not set"
-                status = "❓ Due date missing"
+            try:
+                due = parse(due_str) if due_str else None
+                due_date_str = str(due.date()) if due else "Not set"
+                status = "✅ Completed" if pc_val == 100 else "⏳ Not yet obtained"
+            except Exception:
+                due_date_str = "Invalid date"
+                status = "⚠️ Invalid due date"
 
-            opportunities.append(
-                f"- **Opportunities for: {doc_person} = {title}**:(Due: {due_date_str}, Status: {status})  and is {pc} completed"
+            # Apply status filter
+            if status_filter == "completed" and pc_val < 100:
+                continue
+            if status_filter == "not completed" and pc_val == 100:
+                continue
+
+            if doc_person not in grouped_opportunities:
+                grouped_opportunities[doc_person] = []
+
+            grouped_opportunities[doc_person].append(
+                f"- **{title}**: Due: {due_date_str}, Status: {status}, Completion: {pc_val}%"
             )
 
-    if not opportunities:
-        return f"No opportunities found for **{doc_person}**."
+    if not grouped_opportunities:
+        return "No opportunities found."
 
-    return opportunities
+    markdown_output = []
+    for person, opps in grouped_opportunities.items():
+        markdown_output.append(f"### {person.title()} has these opportunities:\n" + "\n".join(opps))
 
-def contains_rfp_request_for_proposal():
+    return "\n".join(markdown_output)
+
+
+@tool
+def contains_rfp_request_for_proposal(keywords=None):
     """
-    Checks if 'RFP'or 'Request for Proposal' is present in the title, description, or checklist of a given item.
+    Checks if any of the specified keywords (default: RFP-related) are present
+    in the title, description, or checklist of relevant documents.
     """
+    if keywords is None:
+        keywords = ["rfp", "request for proposal", "rfps"]
+
+    pattern = re.compile(r"|".join(re.escape(k) for k in keywords), re.IGNORECASE)
     docs = retriever.get_relevant_documents("")
-    rfp_keywords = ["rfp", "request for proposal", "rfps"]
+
     for doc in docs:
-        title = doc.metadata.get("title", "").lower()
-        description = doc.item.get("description", "").lower()
-        checklist = doc.item.get("checklist", [])
+        title = doc.metadata.get("title", "")
+        description = doc.metadata.get("description", "")
+        checklist = doc.metadata.get("checklist", [])
 
-        # Check title and description
-        if any(keyword in title for keyword in rfp_keywords):
-            return True
-        if any(keyword in description for keyword in rfp_keywords):
+        if pattern.search(title) or pattern.search(description):
             return True
 
-        # Check checklist items
-        for entry in checklist:
-            if any(keyword in entry.lower() for keyword in rfp_keywords):
-                return True
+        if any(pattern.search(entry) for entry in checklist):
+            return True
 
     return False
+
 
 
 @tool
@@ -145,79 +172,66 @@ def who_on_bench() -> str:
     return "\n".join(f"- {person}" for person in bench_people)
 
 
+
 @tool
-def uncompleted_tasks_for_person(person_name: str) -> str:
-    """Returns uncompleted tasks  and its description (<100%) for a person as a markdown table."""
+def tasks_for_person(person_name: str, filter_status: str = None) -> str:
+    """
+    Returns tasks for a person filtered by completion status ('completed', 'uncompleted', or None) as a markdown table.
+    If filter_status is None, returns both completed and uncompleted tasks.
+    """
     docs = retriever.get_relevant_documents("")
-    tasks = [
-        doc for doc in docs
-        if person_name.lower() in (doc.metadata.get("person") or "").lower()
-        and doc.metadata.get("percent_complete", 100) < 100
-    ]
+    person_name_lower = person_name.lower()
+
+    def is_task_for_person(doc):
+        return person_name_lower in (doc.metadata.get("person") or "").lower()
+
+    def is_task_matching_status(doc):
+        percent = doc.metadata.get("percent_complete", 0)
+        if filter_status is None:
+            return True
+        elif filter_status.lower() == "completed":
+            return percent == 100
+        elif filter_status.lower() == "uncompleted":
+            return percent < 100
+        return False
+
+    tasks = [doc for doc in docs if is_task_for_person(doc) and is_task_matching_status(doc)]
 
     if not tasks:
-        return f"No uncompleted tasks for **{person_name}**."
+        status_text = filter_status or "any"
+        return f"No {status_text} tasks for **{person_name}**."
 
+    status_text = filter_status or "All"
     lines = [
-        f"### Uncompleted Tasks for **{person_name}**\n",
+        f"### {status_text.capitalize()} Tasks for **{person_name}**\n",
         "| Task | Percent Complete | Due Date | Priority | Description |",
-        "|-------|-----------------|----------|----------|"
+        "|------|------------------|----------|----------|-------------|"
     ]
+
     for doc in tasks:
         content = doc.page_content.split("\n")[0].strip()
         percent = doc.metadata.get("percent_complete", 0)
-        due = doc.metadata.get("due", "N/A")
-        priority = doc.metadata.get("priority", "N/A")
-        description = doc.metadata.get("description")
-        lines.append(f"| {content} | {percent}% | {due} | {priority} | {description} |")
-
-    return "\n".join(lines)
-
-
-@tool
-def completed_tasks_for_person(person_name: str) -> str:
-    """Returns completed tasks (100%) with description for a person as a markdown table."""
-    docs = retriever.get_relevant_documents("")
-    tasks = [
-        doc for doc in docs
-        if person_name.lower() in (doc.metadata.get("person") or "").lower()
-        and doc.metadata.get("percent_complete", 0) == 100
-    ]
-
-    if not tasks:
-        return f"No completed tasks for **{person_name}**."
-
-    lines = [
-        f"### Completed Tasks for **{person_name}**\n",
-        "| Task     |     Due Date | Priority | Description      |",
-        "|---------------|------------------|------|---------------|"
-    ]
-    for doc in tasks:
-        content = doc.page_content.split("\n")[0].strip()
         due_date = doc.metadata.get("due")
 
         if due_date:
-            # If it's a string, try to parse it
             if isinstance(due_date, str):
                 try:
                     due_date = datetime.fromisoformat(due_date)
-                except ValueError:
-                    due = due_date  # Keep original if parsing fails
-                else:
                     due = due_date.date().isoformat()
+                except ValueError:
+                    due = due_date
             elif isinstance(due_date, datetime):
                 due = due_date.date().isoformat()
             else:
-                due = str(due_date)  # Fallback for unexpected types
+                due = str(due_date)
         else:
             due = "N/A"
 
         priority = doc.metadata.get("priority", "N/A")
-        description = doc.metadata.get("description")
-        lines.append(f"| {content} | {due} | {priority} | {description} |")
+        description = doc.metadata.get("description", "N/A")
+        lines.append(f"| {content} | {percent}% | {due} | {priority} | {description} |")
 
-    return lines
-
+    return "\n".join(lines)
 
 @tool
 def overdue_tasks_for_person(person_name: str) -> str:
@@ -268,14 +282,24 @@ def high_priority_uncompleted_tasks() -> str:
 
     return "\n".join(lines)
 
+def parse_naive_datetime(date_str):
+    try:
+        dt = parse(date_str)
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
+
 @tool
-def kanban_stats_summary() -> str:
+def kanban_stats_summary(person_name: str = None) -> str:
     """
-    Returns statistics on people or if specified a specific person, bench duration, uncompleted tasks, certifications and additional breakdowns by categories, **can be chained with other tools**.
+    Returns statistics on people or, if specified, a specific person: bench duration, uncompleted tasks,
+    certifications, and additional breakdowns by categories. Includes task overview if person_name is provided.
     """
     docs = retriever.get_relevant_documents("")
     now = datetime.now()
-    
+
     bench_people = set()
     total_bench_days = 0
     bench_start_dates = defaultdict(list)
@@ -291,53 +315,42 @@ def kanban_stats_summary() -> str:
         if not person:
             continue
 
-        # Bench duration tracking
+        if person_name and person_name.lower() not in person.lower():
+            continue
+
         if m.get("bench_status") == "On the bench":
             bench_people.add(person)
             start = m.get("start")
             if start:
-                try:
-                    dt = parse(start)
+                dt = parse_naive_datetime(start)
+                if dt:
                     bench_start_dates[person].append(dt)
-                except:
-                    continue
 
-        # Count uncompleted and completed tasks
-        if m.get("percent_complete", 100) < 100:
+        percent = m.get("percent_complete", 0)
+        if percent < 100:
             uncompleted_tasks[person] += 1
-        elif m.get("percent_complete") == 100:
+        elif percent == 100:
             completed_tasks[person] += 1
 
-        # Count certificates
         if m.get("has_certificate"):
             certification_counts[person] += 1
 
-        # Track priorities
         priority = str(m.get("priority", "Unknown"))
         priority_counts[priority]["total"] += 1
-        if m.get("percent_complete", 100) < 100:
+        if percent < 100:
             priority_counts[priority]["uncompleted"] += 1
 
-
-        # Inside loop:
         raw_labels = m.get("labels")
-        if isinstance(raw_labels, str) and len(raw_labels)>0:
-            print('In here')
-            raw_labels = raw_labels.split(',')
-            print(raw_labels)
+        if isinstance(raw_labels, str) and raw_labels.strip():
+            for label in raw_labels.split(','):
+                label_counts[label.strip().lower()] += 1
 
-        for label in raw_labels:
-            label_counts[label.lower()] += 1
-
-
-    avg_bench_days = 0
     for person in bench_people:
         if bench_start_dates[person]:
             earliest = min(bench_start_dates[person])
             try:
-                days_on_bench = (now - earliest).days
-                total_bench_days += days_on_bench
-            except:
+                total_bench_days += (now - earliest).days
+            except Exception:
                 continue
 
     avg_bench_days = round(total_bench_days / len(bench_people), 1) if bench_people else 0
@@ -345,39 +358,53 @@ def kanban_stats_summary() -> str:
     avg_completed = round(sum(completed_tasks.values()) / len(completed_tasks), 1) if completed_tasks else 0
     avg_certifications = round(sum(certification_counts.values()) / len(certification_counts), 1) if certification_counts else 0
 
-    # Markdown output
-    lines = [
-        f"### Kanban Statistical Summary\n",
-        f"- 👥 **People on the bench**: {len(bench_people)}",
-        f"- 📊 **Average days on bench**: {avg_bench_days}",
-        f"- 📄 **Average uncompleted tasks per person**: {avg_uncompleted}",
-        f"- ✅ **Average completed tasks per person**: {avg_completed}",
-        f"- 🏁 **Average certifications per person**: {avg_certifications}",
-        "\n---\n",
-        "### Top People by Uncompleted Tasks",
-    ]
-    for person, count in sorted(uncompleted_tasks.items(), key=lambda x: -x[1])[:5]:
-        lines.append(f"- **{person}**: {count} uncompleted tasks")
+    lines = []
 
-    lines.append("\n### Top People by Completed Tasks")
-    for person, count in sorted(completed_tasks.items(), key=lambda x: -x[1])[:5]:
-        lines.append(f"- **{person}**: {count} completed tasks")
+    if person_name:
+        lines.append(f"### 📌 Detailed Stats for **{person_name}**\n")
+        lines.append(f"- 🪑 On the bench: {'Yes' if person_name in bench_people else 'No'}")
+        if person_name in bench_start_dates and bench_start_dates[person_name]:
+            days = (now - min(bench_start_dates[person_name])).days
+            lines.append(f"- ⏳ Days on bench: {days}")
+        lines.append(f"- 📄 Uncompleted tasks: {uncompleted_tasks.get(person_name, 0)}")
+        lines.append(f"- ✅ Completed tasks: {completed_tasks.get(person_name, 0)}")
+        lines.append(f"- 🏁 Certifications: {certification_counts.get(person_name, 0)}")
 
-    lines.append("\n### People with Most Certifications")
-    for person, count in sorted(certification_counts.items(), key=lambda x: -x[1])[:5]:
-        lines.append(f"- **{person}**: {count} certifications")
+        # 🔄 Include task overview
+        lines.append("\n---\n")
+        lines.append(tasks_for_person(person_name))  # Show all tasks
 
-    lines.append("\n### Task Priority Distribution")
-    for priority, counts in sorted(priority_counts.items(), key=lambda x: x[0]):
-        lines.append(f"- **Priority {priority}**: {counts['total']} total, {counts['uncompleted']} uncompleted")
+    else:
+        lines.extend([
+            f"### 📊 Kanban Statistical Summary\n",
+            f"- 👥 People on the bench: {len(bench_people)}",
+            f"- ⏳ Average days on bench: {avg_bench_days}",
+            f"- 📄 Average uncompleted tasks per person: {avg_uncompleted}",
+            f"- ✅ Average completed tasks per person: {avg_completed}",
+            f"- 🏁 Average certifications per person: {avg_certifications}",
+            "\n---\n",
+            "### 🔝 Top People by Uncompleted Tasks",
+        ])
+        for person, count in sorted(uncompleted_tasks.items(), key=lambda x: -x[1])[:5]:
+            lines.append(f"- **{person}**: {count} uncompleted tasks")
 
-    lines.append("\n### Most Common Labels")
-    for label, count in label_counts.most_common(5):
-        lines.append(f"- **{label}**: {count} tasks")
+        lines.append("\n### 🔝 Top People by Completed Tasks")
+        for person, count in sorted(completed_tasks.items(), key=lambda x: -x[1])[:5]:
+            lines.append(f"- **{person}**: {count} completed tasks")
+
+        lines.append("\n### 🏅 People with Most Certifications")
+        for person, count in sorted(certification_counts.items(), key=lambda x: -x[1])[:5]:
+            lines.append(f"- **{person}**: {count} certifications")
+
+        lines.append("\n### ⚠️ Task Priority Distribution")
+        for priority, counts in sorted(priority_counts.items(), key=lambda x: x[0]):
+            lines.append(f"- **Priority {priority}**: {counts['total']} total, {counts['uncompleted']} uncompleted")
+
+        lines.append("\n### 🏷️ Most Common Labels")
+        for label, count in label_counts.most_common(5):
+            lines.append(f"- **{label}**: {count} tasks")
 
     return "\n".join(lines)
-
-
 
 @tool
 def tasks_with_checklist() -> str:
@@ -530,62 +557,188 @@ def bench_duration_for_person(person_name: str) -> str:
     delta_days = (now_utc - earliest).days
     return f"**{person_name}** has been on the bench for **{delta_days} days**, since **{earliest.date().isoformat()}**."
 
+from datetime import datetime
+from collections import defaultdict, Counter
+from dateutil.parser import parse
+from langchain.tools import tool
+from pydantic import BaseModel, Field
 
-@tool
-def who_completed_certificate(keyword: str, completed_only: bool = True) -> str:
-    """
-    Returns a list of people who obtained a certification/training matching the keyword.
-    Includes extra metadata for context. Optionally filters by completed tasks only, can be chained with other tools.
-    """
+class KanbanInput(BaseModel):
+    person_name: str = Field(None, description="Name of the person to summarize")
+    filter_status: str = Field(None, description="Task filter: 'completed', 'uncompleted', or None for all")
 
+def parse_naive_datetime(date_str):
+    try:
+        dt = parse(date_str)
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
+
+@tool(args_schema=KanbanInput)
+def kanban_stats_summary(person_name: str = None, filter_status: str = None) -> str:
+    """
+    Returns kanban statistics and optionally a task overview for a specific person.
+    If person_name is provided, includes task table filtered by completion status.
+    """
     docs = retriever.get_relevant_documents("")
-    matches = []
+    now = datetime.now()
 
-    keyword_lc = keyword.lower()
+    bench_people = set()
+    total_bench_days = 0
+    bench_start_dates = defaultdict(list)
+    uncompleted_tasks = defaultdict(int)
+    completed_tasks = defaultdict(int)
+    certification_counts = defaultdict(int)
+    priority_counts = defaultdict(lambda: defaultdict(int))
+    label_counts = Counter()
+
+    person_name_lower = person_name.lower() if person_name else None
+
+    def is_task_for_person(doc):
+        return person_name_lower in (doc.metadata.get("person") or "").lower()
+
+    def is_task_matching_status(doc):
+        percent = doc.metadata.get("percent_complete", 0)
+        if filter_status is None:
+            return True
+        elif filter_status.lower() == "completed":
+            return percent == 100
+        elif filter_status.lower() == "uncompleted":
+            return percent < 100
+        return False
+
+    task_lines = []
 
     for doc in docs:
-        title = doc.metadata.get("title", "") or doc.page_content
-        if keyword_lc not in title.lower():
+        m = doc.metadata
+        person = m.get("person", "Unknown")
+        if not person:
             continue
 
-        if completed_only and doc.metadata.get("percent_complete", 0) < 100:
+        if person_name and person_name_lower not in person.lower():
             continue
 
-        person = doc.metadata.get("person", "Unknown")
-        percent = doc.metadata.get("percent_complete", 0)
-        due_raw = doc.metadata.get("due", "")
-        labels = doc.metadata.get("labels", [])
-        priority = doc.metadata.get("priority", "N/A")
+        # Bench tracking
+        if m.get("bench_status") == "On the bench":
+            bench_people.add(person)
+            start = m.get("start")
+            if start:
+                dt = parse_naive_datetime(start)
+                if dt:
+                    bench_start_dates[person].append(dt)
 
-        try:
-            due = parse(due_raw).date().isoformat() if due_raw else "N/A"
-        except Exception:
-            due = "N/A"
+        # Task completion
+        percent = m.get("percent_complete", 0)
+        if percent < 100:
+            uncompleted_tasks[person] += 1
+        elif percent == 100:
+            completed_tasks[person] += 1
 
-        matches.append({
-            "person": person,
-            "title": title.strip(),
-            "due": due,
-            "percent": percent,
-            "labels": labels,
-            "priority": priority,
-        })
+        # Certifications
+        if m.get("has_certificate"):
+            certification_counts[person] += 1
 
-    if not matches:
-        return f"No one found with certification containing '**{keyword}**'."
+        # Priorities
+        priority = str(m.get("priority", "Unknown"))
+        priority_counts[priority]["total"] += 1
+        if percent < 100:
+            priority_counts[priority]["uncompleted"] += 1
 
-    lines = [f"### Certifications Matching '**{keyword}**'\n"]
+        # Labels
+        raw_labels = m.get("labels")
+        if isinstance(raw_labels, str) and raw_labels.strip():
+            for label in raw_labels.split(','):
+                label_counts[label.strip().lower()] += 1
 
-    for m in sorted(matches, key=lambda x: (x["person"], x["due"])):
-        lines.append(f"- **{m['person']}**:")
-        lines.append(f"  - 🏁 **{m['title']}**")
-        lines.append(f"    - Due: `{m['due']}`")
-        lines.append(f"    - Progress: `{m['percent']}%`")
-        lines.append(f"    - Priority: `{m['priority']}`")
-        lines.append(f"    - Labels: `{', '.join(m['labels']) if isinstance(m['labels'], list) else m['labels']}`")
-        lines.append("")
+        # Task table (only if person_name is provided)
+        if person_name and is_task_for_person(doc) and is_task_matching_status(doc):
+            content = doc.page_content.split("\n")[0].strip()
+            due_date = m.get("due")
+            if due_date:
+                if isinstance(due_date, str):
+                    try:
+                        due_date = datetime.fromisoformat(due_date)
+                        due = due_date.date().isoformat()
+                    except ValueError:
+                        due = due_date
+                elif isinstance(due_date, datetime):
+                    due = due_date.date().isoformat()
+                else:
+                    due = str(due_date)
+            else:
+                due = "N/A"
+
+            task_lines.append(f"| {content} | {percent}% | {due} | {m.get('priority', 'N/A')} | {m.get('description', 'N/A')} |")
+
+    for person in bench_people:
+        if bench_start_dates[person]:
+            earliest = min(bench_start_dates[person])
+            try:
+                total_bench_days += (now - earliest).days
+            except Exception:
+                continue
+
+    avg_bench_days = round(total_bench_days / len(bench_people), 1) if bench_people else 0
+    avg_uncompleted = round(sum(uncompleted_tasks.values()) / len(uncompleted_tasks), 1) if uncompleted_tasks else 0
+    avg_completed = round(sum(completed_tasks.values()) / len(completed_tasks), 1) if completed_tasks else 0
+    avg_certifications = round(sum(certification_counts.values()) / len(certification_counts), 1) if certification_counts else 0
+
+    lines = []
+
+    if person_name:
+        lines.append(f"### 📌 Detailed Stats for **{person_name}**\n")
+        lines.append(f"- 🪑 On the bench: {'Yes' if person_name in bench_people else 'No'}")
+        if person_name in bench_start_dates and bench_start_dates[person_name]:
+            days = (now - min(bench_start_dates[person_name])).days
+            lines.append(f"- ⏳ Days on bench: {days}")
+        lines.append(f"- 📄 Uncompleted tasks: {uncompleted_tasks.get(person_name, 0)}")
+        lines.append(f"- ✅ Completed tasks: {completed_tasks.get(person_name, 0)}")
+        lines.append(f"- 🏁 Certifications: {certification_counts.get(person_name, 0)}")
+
+        if task_lines:
+            lines.append("\n---\n")
+            status_text = filter_status or "All"
+            lines.append(f"### {status_text.capitalize()} Tasks for **{person_name}**\n")
+            lines.append("| Task | Percent Complete | Due Date | Priority | Description |")
+            lines.append("|------|------------------|----------|----------|-------------|")
+            lines.extend(task_lines)
+        else:
+            lines.append(f"\nNo {filter_status or 'any'} tasks found for **{person_name}**.")
+
+    else:
+        lines.extend([
+            f"### 📊 Kanban Statistical Summary\n",
+            f"- 👥 People on the bench: {len(bench_people)}",
+            f"- ⏳ Average days on bench: {avg_bench_days}",
+            f"- 📄 Average uncompleted tasks per person: {avg_uncompleted}",
+            f"- ✅ Average completed tasks per person: {avg_completed}",
+            f"- 🏁 Average certifications per person: {avg_certifications}",
+            "\n---\n",
+            "### 🔝 Top People by Uncompleted Tasks",
+        ])
+        for person, count in sorted(uncompleted_tasks.items(), key=lambda x: -x[1])[:5]:
+            lines.append(f"- **{person}**: {count} uncompleted tasks")
+
+        lines.append("\n### 🔝 Top People by Completed Tasks")
+        for person, count in sorted(completed_tasks.items(), key=lambda x: -x[1])[:5]:
+            lines.append(f"- **{person}**: {count} completed tasks")
+
+        lines.append("\n### 🏅 People with Most Certifications")
+        for person, count in sorted(certification_counts.items(), key=lambda x: -x[1])[:5]:
+            lines.append(f"- **{person}**: {count} certifications")
+
+        lines.append("\n### ⚠️ Task Priority Distribution")
+        for priority, counts in sorted(priority_counts.items(), key=lambda x: x[0]):
+            lines.append(f"- **Priority {priority}**: {counts['total']} total, {counts['uncompleted']} uncompleted")
+
+        lines.append("\n### 🏷️ Most Common Labels")
+        for label, count in label_counts.most_common(5):
+            lines.append(f"- **{label}**: {count} tasks")
 
     return "\n".join(lines)
+
 
 
 @tool

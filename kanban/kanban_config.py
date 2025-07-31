@@ -1,13 +1,13 @@
 import os
-from .tools import bench_duration_for_person, filter_tasks_by_label, certificates_completed_since, get_opportunities, completed_tasks_for_person, general_qa, high_priority_uncompleted_tasks, kanban_stats_summary, last_completed_task_for_person, overdue_tasks_for_person, tasks_started_after, tasks_with_checklist, uncompleted_tasks_for_person, who_on_bench
+from .tools import bench_duration_for_person, contains_rfp_request_for_proposal, filter_tasks_by_label, certificates_completed_since, get_opportunities,  general_qa, high_priority_uncompleted_tasks, kanban_stats_summary, last_completed_task_for_person, overdue_tasks_for_person, tasks_for_person, tasks_started_after, tasks_with_checklist, who_on_bench
 from langchain.memory import ConversationBufferMemory
 from langchain.agents import initialize_agent, AgentType
 from config import model
 
 tools = [
     who_on_bench,
-    uncompleted_tasks_for_person,
-    completed_tasks_for_person,
+    tasks_for_person,
+    contains_rfp_request_for_proposal,
     overdue_tasks_for_person,
     high_priority_uncompleted_tasks,
     tasks_with_checklist,
