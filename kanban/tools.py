@@ -1,11 +1,10 @@
 import re
-from typing import List, Optional
+from typing import Annotated, Optional
 from urllib import parse
 from langchain.tools import tool
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from collections import defaultdict, Counter
 from config import model
-from langchain_chroma import Chroma
 from langchain.chains import RetrievalQA
 from dateutil.parser import parse
 from datetime import datetime
@@ -15,7 +14,7 @@ from db import connection
 vectordb = connection.supabase
 llm = model
 
-retriever = vectordb.as_retriever(search_kwargs={"k": 700})  # increase k for broader fetch
+retriever = vectordb.as_retriever(search_kwargs={"k": 700})  
 qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
 
 
@@ -62,12 +61,12 @@ def filter_tasks_by_label(label: str, status_filter: Optional[str] = None) -> st
             else:
                 in_progress_tasks.append(task_line)
 
-    output = [f"### 🏷️ Tasks with Label '**{label}**':\n"]
+    output = [f"🏷️ Tasks with Label '**{label}**':\n"]
 
     if in_progress_tasks:
-        output.append("#### 🔄 In Progress:\n" + "\n".join(in_progress_tasks))
+        output.append("🔄 In Progress:\n" + "\n".join(in_progress_tasks))
     if completed_tasks:
-        output.append("#### ✅ Completed:\n" + "\n".join(completed_tasks))
+        output.append("✅ Completed:\n" + "\n".join(completed_tasks))
 
     return "\n\n".join(output)
 
@@ -117,7 +116,7 @@ def get_opportunities(status_filter: Optional[str] = None) -> str:
                 grouped_opportunities[doc_person] = []
 
             grouped_opportunities[doc_person].append(
-                f"- **{title}**: Due: {due_date_str}, Status: {status}, Completion: {pc_val}%"
+                f"- **{title}**: Due: {due_date_str}, Status: {status}, Completion: {pc_val}% with description {description}"
             )
 
     if not grouped_opportunities:
@@ -171,6 +170,48 @@ def who_on_bench() -> str:
     
     return "\n".join(f"- {person}" for person in bench_people)
 
+
+@tool
+def task_due(is_due_by: str = datetime.now(), due_filter: str = None, person_name: str = None):
+    """
+    Returns the tasks that are due by a certain date or person, which could be in the future or past which depends on the due filter
+    depending on the query. This tool can be chained with other tools.
+    """
+    docs = retriever.get_relevant_documents("")  # Consider passing a query here for better filtering
+    tasks = {}
+
+    for doc in docs:
+        m = doc.metadata
+        due = m.get("due")
+        task = m.get("title")
+        description = m.get("description")
+        checklist = m.get("checklist", "No checklist")
+        person = m.get("person")
+
+        # Skip if person_name is specified and doesn't match
+        if person_name and person_name.lower() not in person.lower():
+            continue
+
+        # Apply due_filter logic
+        if due_filter in ['before', 'finished']:
+            if due > is_due_by:
+                continue
+        elif due_filter in ['after', 'upcoming']:
+            if due < is_due_by:
+                continue
+        # If no due_filter, include all
+
+        key = person_name.lower() if person_name else person.lower()
+        tasks.setdefault(key, []).append(
+            f"- **{task}** for {person}: the due date is: {due} with description {description} and checklist: {checklist}"
+        )
+
+    # Format output
+    markdown_output = []
+    for person, task_list in tasks.items():
+        markdown_output.append(f"### {person} has these tasks:\n" + "\n".join(task_list) + "\nThat are still due.")
+
+    return "\n".join(markdown_output) if markdown_output else "No matching tasks found."
 
 
 @tool
