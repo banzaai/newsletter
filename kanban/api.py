@@ -2,12 +2,13 @@ import json
 import uuid
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
+from auth import verify_token
 from config import embeddings
 import markdown
 from typing import Annotated
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from .classes import TaskList, build_document, get_access_token, get_buckets, get_plans, get_task_details, get_tasks, get_teams
-from fastapi import APIRouter, Query, Body, HTTPException
+from fastapi import APIRouter, Depends, Query, Body, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
 from pathlib import Path
 from .kanban_config import agent
@@ -17,6 +18,11 @@ from db import ENVIRONMENT, connection
 load_dotenv(override=True)
 
 router = APIRouter()
+
+
+@router.get("/api/me")
+def get_user(email: str = Depends(verify_token)):
+    return {"email": email}
 
 @router.get("/teams/")
 def api_get_teams():
@@ -59,7 +65,7 @@ def api_get_tasks(plan_id: str):
         raise HTTPException(status_code=500, detail=str(e))
     
 @router.post("/save_kanban_info/", response_class=HTMLResponse)
-async def save_kanban_info(task_list: Annotated[TaskList, Body(...)]):
+async def save_kanban_info(task_list: Annotated[TaskList, Body(...)], email: str = Depends(verify_token)):
     print('📥 Received request to save kanban info')
 
     try:

@@ -1,15 +1,11 @@
-import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from story import api as story
 from event import api as event
 from kanban import api as kanban
-from dotenv import load_dotenv
-import uvicorn
 from fastapi import Request
 from fastapi.responses import HTMLResponse
-
 
 # FastAPI app
 app = FastAPI()

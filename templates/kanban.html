@@ -24,12 +24,42 @@
 
     <div id="spinner" class="spinner"></div>
     <button class="load-button" onclick="loadTasks()">Load and save tasks</button>
-
   </div>
 
   <script>
+    //##################################//
+    const TOKEN = "supersecrettoken123"; 
+    const AUTHORIZED_EMAIL = "daan@example.com"; 
+    //##################################//
+async function checkUser() {
+  try {
+    const res = await fetch("/api/me", {
+      headers: { Authorization: `Bearer ${TOKEN}` }
+    });
+
+    if (!res.ok) throw new Error("Unauthorized");
+
+    const user = await res.json();
+    if (user.email !== AUTHORIZED_EMAIL) {
+      disableButton();
+    }
+  } catch (err) {
+    disableButton();
+  }
+}
+
+function disableButton(message) {
+  const button = document.querySelector(".load-button");
+  button.disabled = true;
+  button.textContent = "No permission";
+  button.style.backgroundColor = "grey";
+  button.style.color = "white"; // optional for better contrast
+}
+
     async function fetchTeams() {
-      const res = await fetch("/api/teams/");
+      const res = await fetch("/api/teams/", {
+        headers: { Authorization: `Bearer ${TOKEN}` }
+      });
       const teams = await res.json();
       const select = document.getElementById("teams");
       select.innerHTML = "";
@@ -45,7 +75,9 @@
     }
 
     async function fetchPlans(teamId) {
-      const res = await fetch(`/api/plans/${teamId}/`);
+      const res = await fetch(`/api/plans/${teamId}/`, {
+        headers: { Authorization: `Bearer ${TOKEN}` }
+      });
       const plans = await res.json();
       const select = document.getElementById("plans");
       select.innerHTML = "";
@@ -70,16 +102,17 @@
       const planId = document.getElementById("plans").value;
 
       try {
-        // Step 1: Load tasks
-        const res = await fetch(`/api/tasks/${planId}/`);
+        const res = await fetch(`/api/tasks/${planId}/`, {
+          headers: { Authorization: `Bearer ${TOKEN}` }
+        });
         const tasks = await res.json();
         loadedTasks = tasks;
 
-        // Step 2: Save tasks immediately
         const saveRes = await fetch("/api/save_kanban_info/", {
           method: "POST",
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TOKEN}`
           },
           body: JSON.stringify({ tasks: loadedTasks })
         });
@@ -97,6 +130,7 @@
       }
     }
 
+    checkUser();
     fetchTeams();
   </script>
 </body>
