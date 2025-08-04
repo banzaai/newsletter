@@ -25,6 +25,7 @@ class Task(BaseModel):
     bucketId: Optional[str] = None
     title: str
     bucketName: Optional[str] = None
+    createdDateTime: Optional[str] = None
     percentComplete: Optional[int] = 0
     priority: Optional[int] = None
     startDateTime: Optional[str] = None
@@ -213,7 +214,8 @@ def build_document(task: Task) -> Document:
             "has_checklist": bool(task.details and task.details.checklist),
             "checklist": checklist_items,
             "labels": ", ".join(Category[key].value for key, value in task.appliedCategories.items() if value),
-            "has_certificate": has_certificate
+            "has_certificate": has_certificate,
+            "createdDateTime": task.createdDateTime or "N/A"
         }
     )
 

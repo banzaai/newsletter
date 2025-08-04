@@ -1,6 +1,10 @@
+import ast
+import json
+import os
 import re
-from typing import Annotated, Optional
+from typing import Annotated, Dict, Optional, Union
 from urllib import parse
+import uuid
 from langchain.tools import tool
 from datetime import datetime, timezone
 from collections import defaultdict, Counter
@@ -10,12 +14,62 @@ from dateutil.parser import parse
 from datetime import datetime
 from dateutil.parser import parse
 from db import connection
+import plotly.express as px
+import pandas as pd 
+from typing import Union, Dict
+import json, re
+import plotly.express as px
+import tempfile
+
 
 vectordb = connection.supabase
 llm = model
 
 retriever = vectordb.as_retriever(search_kwargs={"k": 700})  
 qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
+
+@tool
+def generate_pie_chart_from_tool_output(output: Union[str, Dict], title: str) -> str:
+    """
+    Takes output from another tool, tries to parse it into {category:count} dict,
+    and generates an interactive Plotly pie chart saved as an HTML file inline.
+
+    Args: 
+        output (Union[str, Dict]): Output from another tool, expected to be a dict or a string that can be parsed into a dict.
+        title (str): Title for the pie chart.
+    """
+    distribution = None
+
+    if isinstance(output, dict):
+        distribution = output
+    elif isinstance(output, str):
+        try:
+            distribution = json.loads(output)
+        except json.JSONDecodeError:
+            try:
+                distribution = ast.literal_eval(output)
+            except Exception:
+                matches = re.findall(r"([^:]+):\s*(\d+)", output)
+                if matches:
+                    distribution = {label.strip(): int(count) for label, count in matches}
+
+    if not distribution:
+        raise ValueError("No valid distribution data found in the output.")
+
+    fig = px.pie(
+        names=list(distribution.keys()),
+        values=list(distribution.values()),
+        title=title,
+        hole=0.3
+    )
+    fig.update_traces(textinfo='percent+label')
+
+    chart_id = str(uuid.uuid4())
+    chart_filename = f"{chart_id}.html"
+    chart_path = os.path.join(tempfile.gettempdir(), chart_filename)
+    fig.write_html(chart_path)
+    print(f"Chart saved to: {chart_path}")
+    return f"/api/chart/{chart_id}"
 
 
 @tool
@@ -157,18 +211,35 @@ def contains_rfp_request_for_proposal(keywords=None):
 
 
 @tool
-def who_on_bench() -> str:
-    """Returns a markdown list of people who are currently on the bench. 
-    Use this to find available individuals. """
+def who_on_bench(on_bench: bool = True) -> str:
+    """
+    Returns a markdown list of people who are currently on or not on the bench, and their start date.
+    Use this to find available or engaged individuals.
 
-    docs = retriever.get_relevant_documents("who is on the bench")
-    
-    bench_people = [doc.metadata.get("person") for doc in docs if doc.metadata.get("bench_status") == "On the bench"]
-    
-    if not bench_people:
-        return "No one is currently on the bench."
-    
-    return "\n".join(f"- {person}" for person in bench_people)
+    Args:
+        on_bench (bool): If True, returns people on the bench. If False, returns people not on the bench.
+    """
+    query = "who is on the bench" if on_bench else "who is not on the bench"
+    docs = retriever.get_relevant_documents(query)
+
+    target_status = "On the bench" if on_bench else "Not on the bench"
+    filtered_people = [
+        (doc.metadata.get("person"), doc.metadata.get("createdDateTime"))
+        for doc in docs
+        if doc.metadata.get("bench_status") == target_status
+    ]
+
+    if not filtered_people:
+        return f"No one is currently {target_status.lower()}."
+
+    # Get earliest date per person
+    earliest_date_person = {}
+    for person, date in filtered_people:
+        if person not in earliest_date_person or date < earliest_date_person[person]:
+            date = parse(date).date().isoformat() if isinstance(date, str) else date
+            earliest_date_person[person] = date
+
+    return "\n".join(f"- {person} (Joined on: {date})" for person, date in earliest_date_person.items())
 
 
 @tool
@@ -177,7 +248,7 @@ def task_due(is_due_by: str = datetime.now(), due_filter: str = None, person_nam
     Returns the tasks that are due by a certain date or person, which could be in the future or past which depends on the due filter
     depending on the query. This tool can be chained with other tools.
     """
-    docs = retriever.get_relevant_documents("")  # Consider passing a query here for better filtering
+    docs = retriever.get_relevant_documents("end date of task for certain person")  
     tasks = {}
 
     for doc in docs:
@@ -220,7 +291,7 @@ def tasks_for_person(person_name: str, filter_status: str = None) -> str:
     Returns tasks for a person filtered by completion status ('completed', 'uncompleted', or None) as a markdown table.
     If filter_status is None, returns both completed and uncompleted tasks.
     """
-    docs = retriever.get_relevant_documents("")
+    docs = retriever.get_relevant_documents(f"person {person_name} tasks")
     person_name_lower = person_name.lower()
 
     def is_task_for_person(doc):
@@ -278,7 +349,7 @@ def tasks_for_person(person_name: str, filter_status: str = None) -> str:
 def overdue_tasks_for_person(person_name: str) -> str:
     """Returns overdue, uncompleted tasks for a person in markdown list."""
     now_iso = datetime.now().isoformat()
-    docs = retriever.get_relevant_documents("")
+    docs = retriever.get_relevant_documents(f"person {person_name} tasks with end date overdue")
     overdue = [
         doc for doc in docs
         if person_name.lower() in (doc.metadata.get("person") or "").lower()
@@ -331,122 +402,7 @@ def parse_naive_datetime(date_str):
         return dt
     except Exception:
         return None
-
-@tool
-def kanban_stats_summary(person_name: str = None) -> str:
-    """
-    Returns statistics on people or, if specified, a specific person: bench duration, uncompleted tasks,
-    certifications, and additional breakdowns by categories. Includes task overview if person_name is provided.
-    """
-    docs = retriever.get_relevant_documents("")
-    now = datetime.now()
-
-    bench_people = set()
-    total_bench_days = 0
-    bench_start_dates = defaultdict(list)
-    uncompleted_tasks = defaultdict(int)
-    completed_tasks = defaultdict(int)
-    certification_counts = defaultdict(int)
-    priority_counts = defaultdict(lambda: defaultdict(int))
-    label_counts = Counter()
-
-    for doc in docs:
-        m = doc.metadata
-        person = m.get("person", "Unknown")
-        if not person:
-            continue
-
-        if person_name and person_name.lower() not in person.lower():
-            continue
-
-        if m.get("bench_status") == "On the bench":
-            bench_people.add(person)
-            start = m.get("start")
-            if start:
-                dt = parse_naive_datetime(start)
-                if dt:
-                    bench_start_dates[person].append(dt)
-
-        percent = m.get("percent_complete", 0)
-        if percent < 100:
-            uncompleted_tasks[person] += 1
-        elif percent == 100:
-            completed_tasks[person] += 1
-
-        if m.get("has_certificate"):
-            certification_counts[person] += 1
-
-        priority = str(m.get("priority", "Unknown"))
-        priority_counts[priority]["total"] += 1
-        if percent < 100:
-            priority_counts[priority]["uncompleted"] += 1
-
-        raw_labels = m.get("labels")
-        if isinstance(raw_labels, str) and raw_labels.strip():
-            for label in raw_labels.split(','):
-                label_counts[label.strip().lower()] += 1
-
-    for person in bench_people:
-        if bench_start_dates[person]:
-            earliest = min(bench_start_dates[person])
-            try:
-                total_bench_days += (now - earliest).days
-            except Exception:
-                continue
-
-    avg_bench_days = round(total_bench_days / len(bench_people), 1) if bench_people else 0
-    avg_uncompleted = round(sum(uncompleted_tasks.values()) / len(uncompleted_tasks), 1) if uncompleted_tasks else 0
-    avg_completed = round(sum(completed_tasks.values()) / len(completed_tasks), 1) if completed_tasks else 0
-    avg_certifications = round(sum(certification_counts.values()) / len(certification_counts), 1) if certification_counts else 0
-
-    lines = []
-
-    if person_name:
-        lines.append(f"### 📌 Detailed Stats for **{person_name}**\n")
-        lines.append(f"- 🪑 On the bench: {'Yes' if person_name in bench_people else 'No'}")
-        if person_name in bench_start_dates and bench_start_dates[person_name]:
-            days = (now - min(bench_start_dates[person_name])).days
-            lines.append(f"- ⏳ Days on bench: {days}")
-        lines.append(f"- 📄 Uncompleted tasks: {uncompleted_tasks.get(person_name, 0)}")
-        lines.append(f"- ✅ Completed tasks: {completed_tasks.get(person_name, 0)}")
-        lines.append(f"- 🏁 Certifications: {certification_counts.get(person_name, 0)}")
-
-        # 🔄 Include task overview
-        lines.append("\n---\n")
-        lines.append(tasks_for_person(person_name))  # Show all tasks
-
-    else:
-        lines.extend([
-            f"### 📊 Kanban Statistical Summary\n",
-            f"- 👥 People on the bench: {len(bench_people)}",
-            f"- ⏳ Average days on bench: {avg_bench_days}",
-            f"- 📄 Average uncompleted tasks per person: {avg_uncompleted}",
-            f"- ✅ Average completed tasks per person: {avg_completed}",
-            f"- 🏁 Average certifications per person: {avg_certifications}",
-            "\n---\n",
-            "### 🔝 Top People by Uncompleted Tasks",
-        ])
-        for person, count in sorted(uncompleted_tasks.items(), key=lambda x: -x[1])[:5]:
-            lines.append(f"- **{person}**: {count} uncompleted tasks")
-
-        lines.append("\n### 🔝 Top People by Completed Tasks")
-        for person, count in sorted(completed_tasks.items(), key=lambda x: -x[1])[:5]:
-            lines.append(f"- **{person}**: {count} completed tasks")
-
-        lines.append("\n### 🏅 People with Most Certifications")
-        for person, count in sorted(certification_counts.items(), key=lambda x: -x[1])[:5]:
-            lines.append(f"- **{person}**: {count} certifications")
-
-        lines.append("\n### ⚠️ Task Priority Distribution")
-        for priority, counts in sorted(priority_counts.items(), key=lambda x: x[0]):
-            lines.append(f"- **Priority {priority}**: {counts['total']} total, {counts['uncompleted']} uncompleted")
-
-        lines.append("\n### 🏷️ Most Common Labels")
-        for label, count in label_counts.most_common(5):
-            lines.append(f"- **{label}**: {count} tasks")
-
-    return "\n".join(lines)
-
+    
 @tool
 def tasks_with_checklist() -> str:
     """Returns tasks with checklist items as a markdown list, optionally including completed, can be chained with other tools"""

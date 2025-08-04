@@ -1,6 +1,6 @@
 # auth.py
 import os
-from fastapi import Depends, HTTPException, Header
+from fastapi import HTTPException, Header
 
 AUTHORIZED_TOKEN = os.getenv("AUTHORIZED_TOKEN")
 AUTHORIZED_EMAIL = os.getenv("AUTHORIZED_EMAIL")

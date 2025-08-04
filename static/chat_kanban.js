@@ -18,32 +18,62 @@ document.addEventListener("DOMContentLoaded", () => {
         // Show loading message placeholder
         const loadingMsg = appendMessage("assistant", "Thinking...");
 
-        try {
-            const response = await fetch(`/api/kanban_query?query=${encodeURIComponent(query)}`);
-            const msg = await response.json();
-            console.log("msg:", msg);
+       try {
+    const response = await fetch(`/api/kanban_query?query=${encodeURIComponent(query)}`);
+    const msg = await response.json();
+    console.log("msg:", msg);
 
-            // Determine the response content
-            let content = "";
+    const rawHtml = msg.html || "";
+    let chartUrl = "";
 
-            if (msg && typeof msg === "object" && msg.html !== undefined) {
-                content = msg.html;
-            } else if (typeof msg === "string") {
-                content = msg;
-            } else {
-                content = "<em>Empty or invalid response</em>";
-            }
+    // Create a temporary DOM element to parse the HTML
+    const tempDiv = document.createElement("div");
+    tempDiv.innerHTML = rawHtml;
 
-            // Replace the placeholder with full HTML content
-            loadingMsg.innerHTML = `
-                <strong>Assistant:</strong><br>
-                <div class="assistant-response">${content}</div>
-            `;
-
-        } catch (error) {
-            console.error("Error rendering message:", error);
-            loadingMsg.innerHTML = `<strong>System:</strong> Error retrieving data.`;
+    // Find the first <a> tag and extract the href
+    const link = tempDiv.querySelector("a");
+    if (link && link.href) {
+        const href = link.getAttribute("href");
+        const chartPathIndex = href.indexOf("/api/chart/");
+        if (chartPathIndex !== -1) {
+            chartUrl = href.slice(chartPathIndex); // removes everything before /chart/
         }
+        console.log("Chart URL found:", chartUrl);
+    }
+
+    // Render the assistant response
+    loadingMsg.innerHTML = `
+        <strong>Assistant:</strong><br>
+        <div class="assistant-response">${rawHtml}</div>
+    `;
+
+    if (chartUrl) {
+        // Wait 500ms before embedding the chart
+        setTimeout(() => {
+            const container = loadingMsg.querySelector(".assistant-response");
+            if (container) {
+                const iframe = document.createElement("iframe");
+                iframe.src = chartUrl;
+                iframe.width = "100%";
+                iframe.height = "400px";
+                iframe.style.border = "none";
+                container.appendChild(iframe);
+            } else {
+                console.warn("Could not find .assistant-response container to append chart iframe.");
+            }
+        }, 2000);
+    } else {
+        // fallback if no chart URL found
+        loadingMsg.innerHTML = `
+            <strong>Assistant:</strong><br>
+            <div class="assistant-response">${rawHtml}</div>
+        `;
+    }
+
+} catch (error) {
+    console.error("Error rendering message:", error);
+    loadingMsg.innerHTML = `<strong>System:</strong> Error retrieving data.`;
+}
     });
 
     function appendMessage(sender, message) {

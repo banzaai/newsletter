@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 import uuid
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
@@ -9,10 +11,10 @@ from typing import Annotated
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from .classes import TaskList, build_document, get_access_token, get_buckets, get_plans, get_task_details, get_tasks, get_teams
 from fastapi import APIRouter, Depends, Query, Body, HTTPException
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from pathlib import Path
 from .kanban_config import agent
-from db import ENVIRONMENT, connection
+from db import connection
 
 
 load_dotenv(override=True)
@@ -20,7 +22,18 @@ load_dotenv(override=True)
 router = APIRouter()
 
 
-@router.get("/api/me")
+@router.get("/chart/{chart_id}")
+def get_chart(chart_id: str):
+    chart_path = os.path.join(tempfile.gettempdir(), f"{chart_id}.html")
+    if os.getenv("ENVIRONMENT") == "local":
+        chart_path = os.path.join(os.getenv("DIR_CHART"), f"{chart_id}.html")
+        print(f'chart path is:{chart_path}')
+    if not os.path.exists(chart_path):
+        return {"error": "Chart not found"}
+    return FileResponse(chart_path, media_type="text/html")
+
+
+@router.get("/me/")
 def get_user(email: str = Depends(verify_token)):
     return {"email": email}
 
