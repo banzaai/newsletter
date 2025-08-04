@@ -28,6 +28,9 @@ def get_chart(chart_id: str):
     if os.getenv("ENVIRONMENT") == "local":
         chart_path = os.path.join(os.getenv("DIR_CHART"), f"{chart_id}.html")
         print(f'chart path is:{chart_path}')
+    else:
+        chart_path = os.path.join("/temp/", f"{chart_id}.html")
+    print(f"Fetching chart from: {chart_path}")
     if not os.path.exists(chart_path):
         return {"error": "Chart not found"}
     return FileResponse(chart_path, media_type="text/html")
