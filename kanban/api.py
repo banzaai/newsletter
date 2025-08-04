@@ -24,15 +24,22 @@ router = APIRouter()
 
 @router.get("/chart/{chart_id}")
 def get_chart(chart_id: str):
-    chart_path = os.path.join(tempfile.gettempdir(), f"{chart_id}.html")
-    if os.getenv("ENVIRONMENT") == "local":
-        chart_path = os.path.join(os.getenv("DIR_CHART"), f"{chart_id}.html")
-        print(f'chart path is:{chart_path}')
+    # Determine environment
+    environment = os.getenv("ENVIRONMENT")
+
+    # Set chart path based on environment
+    if environment == "local":
+        chart_dir = os.getenv("DIR_CHART", tempfile.gettempdir())
     else:
-        chart_path = os.path.join("/temp/", f"{chart_id}.html")
+        chart_dir = tempfile.gettempdir()  # Render allows writing to /tmp
+
+    chart_path = os.path.join(chart_dir, f"{chart_id}.html")
     print(f"Fetching chart from: {chart_path}")
+
+    # Check if file exists
     if not os.path.exists(chart_path):
         return {"error": "Chart not found"}
+
     return FileResponse(chart_path, media_type="text/html")
 
 
