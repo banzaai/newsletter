@@ -22,12 +22,7 @@ jobs:
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
-
-      - name: Create and start virtual environment
-        run: |
-          python -m venv venv
-          source venv/bin/activate
+          python-version: '3.12'
       
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -68,4 +63,6 @@ jobs:
         with:
           app-name: 'kanban-scraper'
           slot-name: 'Production'
+
           
+
