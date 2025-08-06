@@ -19,7 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const loadingMsg = appendMessage("assistant", "Thinking...");
 
        try {
-    const response = await fetch(`/api/kanban_query?query=${encodeURIComponent(query)}/`);
+    const response = await fetch(`/api/kanban_query?query=${encodeURIComponent(query)}`);
     const msg = await response.json();
     console.log("msg:", msg);
 

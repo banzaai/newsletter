@@ -123,7 +123,7 @@ async def save_kanban_info(task_list: Annotated[TaskList, Body(...)], email: str
         return HTMLResponse(content=f"Error saving kanban information: {e}")
 
 
-@router.get("/kanban_query/")
+@router.get("/kanban_query")
 async def kanban_query(query: Annotated[str, Query(description="Your question")]):
     try:
         answer = await agent.arun(query)
