@@ -19,7 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const loadingMsg = appendMessage("assistant", "Thinking...");
 
        try {
-    const response = await fetch(`/api/kanban_query?query=${encodeURIComponent(query)}`);
+    const response = await fetch(`/api/kanban_query?query=${encodeURIComponent(query)}/`);
     const msg = await response.json();
     console.log("msg:", msg);
 
@@ -56,7 +56,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const container = loadingMsg.querySelector(".assistant-response");
             if (container) {
                 const iframe = document.createElement("iframe");
-                iframe.src = chartUrl.startsWith("/") ? chartUrl : `https://${window.location.host}${chartUrl}`;
+                iframe.src = chartUrl.startsWith("/") ? chartUrl : `https://${window.location.host}${chartUrl}/`;
                 iframe.width = "100%";
                 iframe.height = "400px";
                 iframe.style.border = "none";
