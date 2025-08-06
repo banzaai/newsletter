@@ -30,19 +30,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const tempDiv = document.createElement("div");
     tempDiv.innerHTML = rawHtml;
 
+    // Find the first <a> tag and extract the href
     const link = tempDiv.querySelector("a");
     if (link && link.href) {
-        let href = link.getAttribute("href");
-        if (href.startsWith("http://")) {
-            href = href.replace("http://", "https://");
-        }
+        const href = link.getAttribute("href");
         const chartPathIndex = href.indexOf("/api/chart/");
         if (chartPathIndex !== -1) {
-            chartUrl = href.slice(chartPathIndex);
+            chartUrl = href.slice(chartPathIndex); // removes everything before /chart/
         }
         console.log("Chart URL found:", chartUrl);
     }
-
 
     // Render the assistant response
     loadingMsg.innerHTML = `
@@ -56,7 +53,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const container = loadingMsg.querySelector(".assistant-response");
             if (container) {
                 const iframe = document.createElement("iframe");
-                iframe.src = chartUrl.startsWith("/") ? chartUrl : `https://${window.location.host}${chartUrl}/`;
+                iframe.src = chartUrl;
                 iframe.width = "100%";
                 iframe.height = "400px";
                 iframe.style.border = "none";
